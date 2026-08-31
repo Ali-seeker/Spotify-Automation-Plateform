@@ -1,0 +1,4 @@
+<resources>
+    <string name="app_name">Spotify Bot</string>
+    <string name="accessibility_description">Accessibility Service for automating Spotify actions including play, pause, like, and skip.</string>
+</resources>
