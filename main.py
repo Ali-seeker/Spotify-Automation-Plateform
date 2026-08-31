@@ -1,0 +1,67 @@
+import os
+import sys
+from dotenv import load_dotenv
+
+# Load environment variables from .env file
+load_dotenv()
+
+# Verify all required environment variables are present
+REQUIRED_ENV_VARS = [
+    "JWT_SECRET",
+    "JWT_ALGORITHM",
+    "ACCESS_TOKEN_EXPIRE_MINUTES",
+    "DATABASE_URL",
+    "DEVICE_SHARED_SECRET",
+]
+
+missing_vars = [var for var in REQUIRED_ENV_VARS if not os.getenv(var)]
+if missing_vars:
+    print(f"CRITICAL ERROR: Missing required environment variables: {', '.join(missing_vars)}")
+    sys.exit(1)
+
+from fastapi import FastAPI, Depends, HTTPException
+from sqlalchemy.orm import Session
+from database import engine, Base, get_db
+
+# Automatically create all SQLite tables on startup
+Base.metadata.create_all(bind=engine)
+
+app = FastAPI(
+    title="Spotify Automation Platform API",
+    description="Backend API for the Spotify Automation Platform",
+    version="1.0.0",
+)
+
+@app.get("/")
+def read_root():
+    """
+    Root endpoint.
+    """
+    return {
+        "status": "online",
+        "message": "Spotify Automation API is running cleanly",
+        "docs_url": "/docs",
+    }
+
+@app.get("/health")
+def health_check(db: Session = Depends(get_db)):
+    """
+    Health check endpoint to verify both API status and DB connectivity.
+    """
+    try:
+        # Check connection by executing a simple query
+        from sqlalchemy import text
+        db.execute(text("SELECT 1"))
+        return {
+            "status": "healthy",
+            "database": "connected",
+            "environment": {
+                "JWT_ALGORITHM": os.getenv("JWT_ALGORITHM"),
+                "ACCESS_TOKEN_EXPIRE_MINUTES": os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES"),
+            }
+        }
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Database connection failed: {str(e)}"
+        )
