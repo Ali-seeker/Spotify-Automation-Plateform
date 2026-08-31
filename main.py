@@ -20,6 +20,7 @@ if missing_vars:
     sys.exit(1)
 
 from fastapi import FastAPI, Depends, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
 from database import engine, Base, get_db
 
@@ -31,6 +32,23 @@ app = FastAPI(
     description="Backend API for the Spotify Automation Platform",
     version="1.0.0",
 )
+
+# Configure CORS for frontend development server
+origins = [
+    "http://localhost:5173",
+    "http://127.0.0.1:5173",
+    "http://localhost:3000",
+    "http://127.0.0.1:3000",
+]
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=origins,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
 
 @app.get("/")
 def read_root():
