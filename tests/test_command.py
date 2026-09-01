@@ -11,6 +11,7 @@ from main import app
 from websocket_manager import manager
 
 client = TestClient(app)
+SHARED_SECRET = os.getenv("DEVICE_SHARED_SECRET", "device_shared_secret_for_auth_123")
 
 
 @pytest.fixture
@@ -95,8 +96,16 @@ def test_send_command_success(auth_headers, test_task_and_device):
     """Verify /send_command generates UUID command_id, UTC timestamp, ttl_ms, creates run history, and queues command for connected device."""
     task_id, device_id = test_task_and_device
 
-    # Connect device to WebSocket via TestClient
+    # Connect device to WebSocket via TestClient & authenticate
     with client.websocket_connect(f"/ws/device/{device_id}") as websocket:
+        websocket.send_json({
+            "type": "DEVICE_HELLO",
+            "device_id": device_id,
+            "device_auth_token": SHARED_SECRET,
+            "app_version": "1.0.0"
+        })
+        ack = websocket.receive_json()
+        assert ack["type"] == "HELLO_ACK"
         assert manager.is_connected(device_id)
 
         # Trigger /send_command
@@ -132,6 +141,15 @@ def test_per_device_sequential_queuing(auth_headers, test_task_and_device):
     task_id, device_id = test_task_and_device
 
     with client.websocket_connect(f"/ws/device/{device_id}") as websocket:
+        websocket.send_json({
+            "type": "DEVICE_HELLO",
+            "device_id": device_id,
+            "device_auth_token": SHARED_SECRET,
+            "app_version": "1.0.0"
+        })
+        ack = websocket.receive_json()
+        assert ack["type"] == "HELLO_ACK"
+
         # Trigger Command 1
         res1 = client.post("/send_command", json={"task_id": task_id, "device_id": device_id}, headers=auth_headers)
         # Trigger Command 2
