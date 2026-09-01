@@ -91,9 +91,10 @@ public class MainActivity extends AppCompatActivity {
             SpotifyLauncher.launchSpotify(MainActivity.this, (launchSuccess, launchMsg) -> {
                 if (launchSuccess) {
                     try { Thread.sleep(500); } catch (InterruptedException ignored) {}
-                    SpotifyClicker.clickSearch((clickSuccess, clickMsg) -> {
+                    SpotifyClicker.clickSearchWithRetry((clickSuccess, clickMsg, reasonCode) -> {
                         mainHandler.post(() -> {
-                            Toast.makeText(MainActivity.this, clickMsg, clickSuccess ? Toast.LENGTH_SHORT : Toast.LENGTH_LONG).show();
+                            String toastText = clickSuccess ? clickMsg : (clickMsg + " [" + reasonCode + "]");
+                            Toast.makeText(MainActivity.this, toastText, clickSuccess ? Toast.LENGTH_SHORT : Toast.LENGTH_LONG).show();
                         });
                     });
                 } else {
