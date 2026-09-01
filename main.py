@@ -22,10 +22,32 @@ if missing_vars:
 from fastapi import FastAPI, Depends, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
-from database import engine, Base, get_db
+from database import engine, Base, SessionLocal, get_db
+import models
+import auth_router
+from security import get_password_hash
 
 # Automatically create all SQLite tables on startup
 Base.metadata.create_all(bind=engine)
+
+# Seed default admin user if database is empty
+def seed_default_user():
+    db = SessionLocal()
+    try:
+        user = db.query(models.User).filter(models.User.username == "admin").first()
+        if not user:
+            default_user = models.User(
+                username="admin",
+                hashed_password=get_password_hash("admin123"),
+                is_active=True
+            )
+            db.add(default_user)
+            db.commit()
+            print("INFO: Default admin user seeded successfully (admin / admin123).")
+    finally:
+        db.close()
+
+seed_default_user()
 
 app = FastAPI(
     title="Spotify Automation Platform API",
@@ -49,6 +71,9 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# Include Authentication Router
+app.include_router(auth_router.router)
+
 
 @app.get("/")
 def read_root():
@@ -67,7 +92,6 @@ def health_check(db: Session = Depends(get_db)):
     Health check endpoint to verify both API status and DB connectivity.
     """
     try:
-        # Check connection by executing a simple query
         from sqlalchemy import text
         db.execute(text("SELECT 1"))
         return {
