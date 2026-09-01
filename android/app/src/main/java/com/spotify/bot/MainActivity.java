@@ -73,10 +73,42 @@ public class MainActivity extends AppCompatActivity {
             });
         });
 
+        Button clickSearchButton = new Button(this);
+        clickSearchButton.setText("Click Spotify Search");
+        clickSearchButton.setBackgroundColor(android.graphics.Color.parseColor("#1DB954"));
+        clickSearchButton.setTextColor(android.graphics.Color.BLACK);
+        clickSearchButton.setPadding(40, 20, 40, 20);
+
+        LinearLayout.LayoutParams clickParams = new LinearLayout.LayoutParams(
+            LinearLayout.LayoutParams.WRAP_CONTENT,
+            LinearLayout.LayoutParams.WRAP_CONTENT
+        );
+        clickParams.setMargins(0, 30, 0, 0);
+        clickSearchButton.setLayoutParams(clickParams);
+
+        clickSearchButton.setOnClickListener(v -> {
+            Toast.makeText(MainActivity.this, "Opening Spotify & Clicking Search...", Toast.LENGTH_SHORT).show();
+            SpotifyLauncher.launchSpotify(MainActivity.this, (launchSuccess, launchMsg) -> {
+                if (launchSuccess) {
+                    try { Thread.sleep(500); } catch (InterruptedException ignored) {}
+                    SpotifyClicker.clickSearch((clickSuccess, clickMsg) -> {
+                        mainHandler.post(() -> {
+                            Toast.makeText(MainActivity.this, clickMsg, clickSuccess ? Toast.LENGTH_SHORT : Toast.LENGTH_LONG).show();
+                        });
+                    });
+                } else {
+                    mainHandler.post(() -> {
+                        Toast.makeText(MainActivity.this, "Launch failed: " + launchMsg, Toast.LENGTH_LONG).show();
+                    });
+                }
+            });
+        });
+
         layout.addView(titleView);
         layout.addView(descView);
         layout.addView(settingsButton);
         layout.addView(launchButton);
+        layout.addView(clickSearchButton);
 
         setContentView(layout);
     }
