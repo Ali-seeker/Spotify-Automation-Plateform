@@ -12,6 +12,7 @@ REQUIRED_ENV_VARS = [
     "ACCESS_TOKEN_EXPIRE_MINUTES",
     "DATABASE_URL",
     "DEVICE_SHARED_SECRET",
+    "COMMAND_TTL_MS",
 ]
 
 missing_vars = [var for var in REQUIRED_ENV_VARS if not os.getenv(var)]
@@ -28,6 +29,8 @@ import auth_router
 import tasks_router
 import devices_router
 import runs_router
+import command_router
+import websocket_router
 from security import get_password_hash
 
 # Automatically create all SQLite tables (users, devices, tasks, runs, run_events) on startup
@@ -79,6 +82,8 @@ app.include_router(auth_router.router)
 app.include_router(tasks_router.router)
 app.include_router(devices_router.router)
 app.include_router(runs_router.router)
+app.include_router(command_router.router)
+app.include_router(websocket_router.router)
 
 
 @app.get("/")
@@ -106,6 +111,7 @@ def health_check(db: Session = Depends(get_db)):
             "environment": {
                 "JWT_ALGORITHM": os.getenv("JWT_ALGORITHM"),
                 "ACCESS_TOKEN_EXPIRE_MINUTES": os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES"),
+                "COMMAND_TTL_MS": os.getenv("COMMAND_TTL_MS"),
             }
         }
     except Exception as e:

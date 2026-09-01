@@ -18,15 +18,18 @@ def create_device(
     current_user: User = Depends(get_current_user)
 ):
     """
-    Creates and persists a new Android device record.
+    Creates or updates (upsert) an Android device record.
     Requires authentication.
     """
     existing = db.query(Device).filter(Device.device_id == device_in.device_id).first()
     if existing:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Device with ID '{device_in.device_id}' already exists"
-        )
+        existing.status = device_in.status or existing.status
+        if device_in.capabilities is not None:
+            existing.capabilities = device_in.capabilities
+        existing.last_seen = device_in.last_seen or datetime.now(timezone.utc)
+        db.commit()
+        db.refresh(existing)
+        return existing
 
     device = Device(
         device_id=device_in.device_id,
