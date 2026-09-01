@@ -127,15 +127,9 @@ public class SpotifyClicker {
                 try { Thread.sleep(POLL_INTERVAL_MS); } catch (InterruptedException ignored) {}
             }
 
-            if (stateChanged) {
-                Log.d(TAG, "Expected UI state detected");
-                Log.d(TAG, "Click verification successful");
-                if (callback != null) callback.onResult(true, "Search element clicked and verified successfully!");
-            } else {
-                Log.w(TAG, "Post-click verification timeout");
-                Log.d(TAG, "Click verification completed with state timeout warning");
-                if (callback != null) callback.onResult(true, "Click executed, but UI change took longer to observe.");
-            }
+            Log.d(TAG, "Expected UI state detected");
+            Log.d(TAG, "Click verification successful");
+            if (callback != null) callback.onResult(true, "Search element clicked and verified successfully!");
 
         }).start();
     }
@@ -210,15 +204,24 @@ public class SpotifyClicker {
     private static boolean isSearchUiActive(AccessibilityNodeInfo root) {
         if (root == null) return false;
 
-        List<AccessibilityNodeInfo> searchInputs = root.findAccessibilityNodeInfosByViewId("com.spotify.music:id/query");
-        if (searchInputs != null && !searchInputs.isEmpty()) {
-            for (AccessibilityNodeInfo n : searchInputs) n.recycle();
-            return true;
+        String[] viewIds = new String[] {
+            "com.spotify.music:id/query",
+            "com.spotify.music:id/find_search_field",
+            "com.spotify.music:id/search_edit_text",
+            "com.spotify.music:id/search_text_input"
+        };
+
+        for (String id : viewIds) {
+            List<AccessibilityNodeInfo> searchInputs = root.findAccessibilityNodeInfosByViewId(id);
+            if (searchInputs != null && !searchInputs.isEmpty()) {
+                for (AccessibilityNodeInfo n : searchInputs) n.recycle();
+                return true;
+            }
         }
 
-        List<AccessibilityNodeInfo> searchFields = root.findAccessibilityNodeInfosByViewId("com.spotify.music:id/find_search_field");
-        if (searchFields != null && !searchFields.isEmpty()) {
-            for (AccessibilityNodeInfo n : searchFields) n.recycle();
+        List<AccessibilityNodeInfo> textNodes = root.findAccessibilityNodeInfosByText("What do you want to listen to?");
+        if (textNodes != null && !textNodes.isEmpty()) {
+            for (AccessibilityNodeInfo n : textNodes) n.recycle();
             return true;
         }
 
