@@ -1,35 +1,66 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import { 
   Activity, 
   AlertCircle, 
   CheckCircle2, 
   Clock, 
-  Play, 
   Radio, 
   Server, 
   Smartphone, 
-  Zap 
+  Zap,
+  RefreshCw
 } from 'lucide-react';
+import { getDevicesApi, getTasksApi, getRunsApi } from '../services/apiService';
+import { useFrontendWebSocket } from '../hooks/useFrontendWebSocket';
 
 export default function DashboardOverview({ onNavigate }) {
+  const [devices, setDevices] = useState([]);
+  const [tasks, setTasks] = useState([]);
+  const [runs, setRuns] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [errorMsg, setErrorMsg] = useState('');
+
+  const { isConnected, deviceUpdates, recentEvents } = useFrontendWebSocket();
+
+  useEffect(() => {
+    loadDashboardData();
+  }, []);
+
+  const loadDashboardData = async () => {
+    setLoading(true);
+    setErrorMsg('');
+    try {
+      const [devsRes, tasksRes, runsRes] = await Promise.all([
+        getDevicesApi().catch(() => []),
+        getTasksApi().catch(() => []),
+        getRunsApi().catch(() => [])
+      ]);
+      setDevices(devsRes);
+      setTasks(tasksRes);
+      setRuns(runsRes);
+    } catch (err) {
+      setErrorMsg('Failed to load some dashboard data from backend server.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Merge dynamic WebSocket status updates into devices array
+  const mergedDevices = devices.map((d) => {
+    const update = deviceUpdates[d.device_id];
+    return update ? { ...d, status: update.status, last_seen: update.last_seen } : d;
+  });
+
+  const onlineDevicesCount = mergedDevices.filter(d => d.status === 'ONLINE' || d.status === 'IDLE' || d.status === 'BUSY').length;
+  const runningTasksCount = runs.filter(r => r.status === 'RUNNING').length;
+  const completedRunsCount = runs.filter(r => r.status === 'SUCCESS').length;
+  const failedRunsCount = runs.filter(r => r.status === 'FAILED').length;
+
   const metrics = [
-    { title: 'Connected Devices', value: '12', sub: '12 ONLINE • 0 OFFLINE', icon: Smartphone, color: '#10b981' },
-    { title: 'Running Tasks', value: '6', sub: 'Processing active queues', icon: Activity, color: '#3b82f6' },
-    { title: 'Completed Runs', value: '142', sub: '98.6% success rate', icon: CheckCircle2, color: '#1db954' },
-    { title: 'Failed Execution', value: '2', sub: 'Requires diagnostic review', icon: AlertCircle, color: '#ef4444' },
-  ];
-
-  const activeSessions = [
-    { id: '#SESS-4902', device: 'Infinix X6817 (dev_infinix_01)', task: 'Play Playlist: Chill Hits', progress: 57, status: 'RUNNING', step: 'CLICK_SEARCH_TAB' },
-    { id: '#SESS-4903', device: 'Galaxy S21 (dev_samsung_02)', task: 'Like Track & Save', progress: 85, status: 'RUNNING', step: 'LIKE_ACTION_OK' },
-    { id: '#SESS-4904', device: 'Pixel 6 (dev_pixel_03)', task: 'Follow Artist: Atif Aslam', progress: 30, status: 'RUNNING', step: 'SEARCH_QUERY_ENTERED' },
-  ];
-
-  const recentLogs = [
-    { id: 1, time: '15:32:10', device: 'Infinix X6817', type: 'STEP_OK', text: 'Accessibility node [search_tab] clicked via ACTION_CLICK', status: 'SUCCESS' },
-    { id: 2, time: '15:31:54', device: 'Galaxy S21', type: 'STEP_STARTED', text: 'Spotify launch initiated via Accessibility Service', status: 'RUNNING' },
-    { id: 3, time: '15:30:12', device: 'Redmi Note 10', type: 'STEP_FAILED', text: 'Expected UI element [like_button] not found. Retried 2 attempts', status: 'FAILED' },
-    { id: 4, time: '15:28:40', device: 'Pixel 6', type: 'STEP_OK', text: 'Command payload cmd_8f9a01 dispatched over WebSocket', status: 'SUCCESS' },
+    { title: 'Connected Devices', value: mergedDevices.length, sub: `${onlineDevicesCount} ONLINE • ${mergedDevices.length - onlineDevicesCount} OFFLINE`, icon: Smartphone, color: '#10b981' },
+    { title: 'Running Tasks', value: runningTasksCount, sub: 'Active execution sessions', icon: Activity, color: '#3b82f6' },
+    { title: 'Completed Runs', value: completedRunsCount, sub: 'Historical successful runs', icon: CheckCircle2, color: '#1db954' },
+    { title: 'Failed Execution', value: failedRunsCount, sub: 'Diagnostic review required', icon: AlertCircle, color: '#ef4444' },
   ];
 
   return (
@@ -63,7 +94,7 @@ export default function DashboardOverview({ onNavigate }) {
                 </div>
               </div>
               <div style={{ fontSize: '2rem', fontWeight: 800, color: '#fff', marginBottom: '0.25rem' }}>
-                {m.value}
+                {loading ? '...' : m.value}
               </div>
               <div style={{ fontSize: '0.75rem', color: '#6b7280', fontFamily: 'monospace' }}>
                 {m.sub}
@@ -79,64 +110,70 @@ export default function DashboardOverview({ onNavigate }) {
         gridTemplateColumns: '2fr 1fr',
         gap: '1.5rem'
       }}>
-        {/* Left: Active Cluster Sessions */}
+        {/* Left: Active Cluster Sessions & Device Summary */}
         <div className="glass-panel" style={{ padding: '1.5rem' }}>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '1.25rem' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: '0.625rem' }}>
               <Server size={20} color="#1db954" />
-              <h3 style={{ fontSize: '1.1rem', fontWeight: 700, color: '#fff' }}>Active Cluster Sessions</h3>
+              <h3 style={{ fontSize: '1.1rem', fontWeight: 700, color: '#fff' }}>Cluster Device Overview</h3>
             </div>
-            <button onClick={() => onNavigate('sessions')} className="btn-secondary" style={{ padding: '0.375rem 0.75rem', fontSize: '0.78rem' }}>
-              View All (3)
+            <button onClick={() => onNavigate('devices')} className="btn-secondary" style={{ padding: '0.375rem 0.75rem', fontSize: '0.78rem' }}>
+              Manage Devices ({mergedDevices.length})
             </button>
           </div>
 
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-            {activeSessions.map((session) => (
-              <div key={session.id} style={{
-                padding: '1.25rem',
-                borderRadius: '10px',
-                backgroundColor: 'rgba(0, 0, 0, 0.3)',
-                border: '1px solid rgba(255, 255, 255, 0.06)'
-              }}>
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '0.5rem' }}>
-                  <div>
-                    <span className="font-mono" style={{ fontSize: '0.78rem', color: '#1db954', fontWeight: 700, marginRight: '0.5rem' }}>
-                      {session.id}
-                    </span>
-                    <span style={{ fontSize: '0.9rem', fontWeight: 600, color: '#fff' }}>
-                      {session.task}
+          {loading ? (
+            <div style={{ padding: '2rem', textAlign: 'center', color: '#9ca3af' }}>
+              <RefreshCw size={24} className="spin" style={{ marginBottom: '0.5rem' }} />
+              <div>Fetching cluster devices from backend database...</div>
+            </div>
+          ) : mergedDevices.length === 0 ? (
+            <div style={{
+              padding: '2.5rem 1.5rem',
+              textAlign: 'center',
+              backgroundColor: 'rgba(0, 0, 0, 0.25)',
+              borderRadius: '10px',
+              border: '1px border-dashed rgba(255, 255, 255, 0.1)'
+            }}>
+              <Smartphone size={32} color="#6b7280" style={{ marginBottom: '0.75rem' }} />
+              <h4 style={{ color: '#fff', fontSize: '1rem', fontWeight: 600 }}>No Devices Registered</h4>
+              <p style={{ color: '#9ca3af', fontSize: '0.82rem', marginTop: '0.25rem', marginBottom: '1rem' }}>
+                No Android devices are currently registered in the database.
+              </p>
+              <button onClick={() => onNavigate('devices')} className="btn-spotify" style={{ fontSize: '0.8rem' }}>
+                Go to Devices & Pair Node
+              </button>
+            </div>
+          ) : (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+              {mergedDevices.slice(0, 4).map((dev) => (
+                <div key={dev.id || dev.device_id} style={{
+                  padding: '1.25rem',
+                  borderRadius: '10px',
+                  backgroundColor: 'rgba(0, 0, 0, 0.3)',
+                  border: '1px solid rgba(255, 255, 255, 0.06)'
+                }}>
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '0.5rem' }}>
+                    <div>
+                      <span className="font-mono" style={{ fontSize: '0.85rem', color: '#1db954', fontWeight: 700, marginRight: '0.5rem' }}>
+                        {dev.device_id}
+                      </span>
+                    </div>
+                    <span className={`badge ${dev.status === 'ONLINE' || dev.status === 'IDLE' ? 'badge-online' : dev.status === 'BUSY' ? 'badge-running' : 'badge-offline'}`}>
+                      <span className="pulse-dot pulse-dot-green" style={{ width: '6px', height: '6px' }}></span> {dev.status}
                     </span>
                   </div>
-                  <span className="badge badge-running">
-                    <span className="pulse-dot pulse-dot-green" style={{ width: '6px', height: '6px' }}></span> {session.status}
-                  </span>
-                </div>
 
-                <div style={{ fontSize: '0.8rem', color: '#9ca3af', marginBottom: '0.75rem', display: 'flex', justifyContent: 'space-between' }}>
-                  <span>Node: <strong style={{ color: '#d1d5db' }}>{session.device}</strong></span>
-                  <span className="font-mono" style={{ color: '#3b82f6' }}>Current: {session.step}</span>
+                  <div style={{ fontSize: '0.78rem', color: '#9ca3af', display: 'flex', justifyContent: 'space-between' }}>
+                    <span>Last Seen: <strong style={{ color: '#d1d5db' }}>{dev.last_seen || 'N/A'}</strong></span>
+                    <span onClick={() => onNavigate('devices')} style={{ color: '#3b82f6', cursor: 'pointer', fontWeight: 600 }}>
+                      Inspect Device →
+                    </span>
+                  </div>
                 </div>
-
-                {/* Progress bar */}
-                <div style={{ width: '100%', height: '6px', backgroundColor: 'rgba(255, 255, 255, 0.08)', borderRadius: '3px', overflow: 'hidden' }}>
-                  <div style={{
-                    width: `${session.progress}%`,
-                    height: '100%',
-                    background: 'linear-gradient(90deg, #3b82f6 0%, #1db954 100%)',
-                    borderRadius: '3px'
-                  }}></div>
-                </div>
-
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '0.5rem', fontSize: '0.72rem', color: '#6b7280' }}>
-                  <span>Progress: {session.progress}%</span>
-                  <span onClick={() => onNavigate('telemetry')} style={{ color: '#1db954', cursor: 'pointer', fontWeight: 600 }}>
-                    Monitor Telemetry →
-                  </span>
-                </div>
-              </div>
-            ))}
-          </div>
+              ))}
+            </div>
+          )}
         </div>
 
         {/* Right: Real-Time Execution Log Feed */}
@@ -144,9 +181,11 @@ export default function DashboardOverview({ onNavigate }) {
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '1.25rem' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
               <Radio size={18} color="#10b981" />
-              <h3 style={{ fontSize: '1rem', fontWeight: 700, color: '#fff' }}>Live Event Feed</h3>
+              <h3 style={{ fontSize: '1rem', fontWeight: 700, color: '#fff' }}>Live Event Stream</h3>
             </div>
-            <span className="badge badge-online" style={{ fontSize: '0.65rem', padding: '0.1rem 0.4rem' }}>● LIVE</span>
+            <span className={`badge ${isConnected ? 'badge-online' : 'badge-warning'}`} style={{ fontSize: '0.65rem', padding: '0.1rem 0.4rem' }}>
+              {isConnected ? '● STREAM ACTIVE' : 'POLLING'}
+            </span>
           </div>
 
           <div style={{
@@ -160,27 +199,26 @@ export default function DashboardOverview({ onNavigate }) {
             display: 'flex',
             flexDirection: 'column',
             gap: '0.875rem',
-            overflowY: 'auto'
+            overflowY: 'auto',
+            minHeight: '220px'
           }}>
-            {recentLogs.map((log) => (
-              <div key={log.id} style={{ borderBottom: '1px solid rgba(255, 255, 255, 0.04)', paddingBottom: '0.625rem' }}>
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '0.25rem' }}>
-                  <span style={{ color: '#6b7280' }}>[{log.time}]</span>
-                  <span style={{
-                    color: log.status === 'SUCCESS' ? '#10b981' : log.status === 'FAILED' ? '#ef4444' : '#3b82f6',
-                    fontWeight: 700
-                  }}>
-                    {log.type}
-                  </span>
-                </div>
-                <div style={{ color: '#d1d5db', marginBottom: '0.2rem', wordBreak: 'break-word' }}>
-                  {log.text}
-                </div>
-                <div style={{ color: '#9ca3af', fontSize: '0.7rem' }}>
-                  Device: {log.device}
-                </div>
+            {recentEvents.length === 0 ? (
+              <div style={{ color: '#6b7280', textAlign: 'center', margin: 'auto' }}>
+                Listening for real-time WebSocket events...
               </div>
-            ))}
+            ) : (
+              recentEvents.map((evt, idx) => (
+                <div key={idx} style={{ borderBottom: '1px solid rgba(255, 255, 255, 0.04)', paddingBottom: '0.625rem' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '0.25rem' }}>
+                    <span style={{ color: '#6b7280' }}>Run: {evt.run_id}</span>
+                    <span style={{ color: '#10b981', fontWeight: 700 }}>{evt.event_type}</span>
+                  </div>
+                  <div style={{ color: '#d1d5db', wordBreak: 'break-word' }}>
+                    {JSON.stringify(evt.payload || {})}
+                  </div>
+                </div>
+              ))
+            )}
           </div>
 
           <button onClick={() => onNavigate('history')} className="btn-secondary" style={{ width: '100%', justifyContent: 'center', marginTop: '1rem', fontSize: '0.8rem' }}>

@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import Sidebar from './components/Sidebar';
 import Header from './components/Header';
 import LoginPage from './pages/LoginPage';
@@ -10,12 +10,50 @@ import LiveTelemetryPage from './pages/LiveTelemetryPage';
 import DiagnosticsPage from './pages/DiagnosticsPage';
 import AutomationHistoryPage from './pages/AutomationHistoryPage';
 import SessionsControlPage from './pages/SessionsControlPage';
+import { getCurrentUserApi } from './services/apiService';
 import './index.css';
 
 export default function App() {
-  const [isAuthenticated, setIsAuthenticated] = useState(true);
+  const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [authChecking, setAuthChecking] = useState(true);
   const [currentPage, setCurrentPage] = useState('overview');
   const [notification, setNotification] = useState(null);
+
+  useEffect(() => {
+    checkInitialAuth();
+
+    // Listen for global 401 Unauthorized events from api.js interceptor
+    const handleUnauthorized = () => {
+      setIsAuthenticated(false);
+      localStorage.removeItem('access_token');
+      showNotification('Session expired or unauthorized. Please sign in again.');
+    };
+
+    window.addEventListener('unauthorized_access', handleUnauthorized);
+    return () => {
+      window.removeEventListener('unauthorized_access', handleUnauthorized);
+    };
+  }, []);
+
+  const checkInitialAuth = async () => {
+    const token = localStorage.getItem('access_token');
+    if (!token) {
+      setIsAuthenticated(false);
+      setAuthChecking(false);
+      return;
+    }
+
+    try {
+      await getCurrentUserApi();
+      setIsAuthenticated(true);
+    } catch (err) {
+      console.warn('Initial token validation failed:', err);
+      localStorage.removeItem('access_token');
+      setIsAuthenticated(false);
+    } finally {
+      setAuthChecking(false);
+    }
+  };
 
   const showNotification = (msg) => {
     setNotification(msg);
@@ -31,6 +69,29 @@ export default function App() {
     setCurrentPage('telemetry');
     showNotification(`Pipeline Retried: ${diagItem.task_name}`);
   };
+
+  const handleLogout = () => {
+    localStorage.removeItem('access_token');
+    setIsAuthenticated(false);
+    showNotification('Logged out successfully.');
+  };
+
+  if (authChecking) {
+    return (
+      <div style={{
+        minHeight: '100vh',
+        backgroundColor: '#0b0e17',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        color: '#1db954',
+        fontFamily: 'monospace',
+        fontSize: '1rem'
+      }}>
+        Initializing Session & Authenticating Node...
+      </div>
+    );
+  }
 
   if (!isAuthenticated) {
     return <LoginPage onLoginSuccess={() => setIsAuthenticated(true)} />;
@@ -53,7 +114,7 @@ export default function App() {
       <Sidebar
         currentPage={currentPage}
         setCurrentPage={setCurrentPage}
-        onLogout={() => setIsAuthenticated(false)}
+        onLogout={handleLogout}
       />
 
       {/* Main Content Area */}
@@ -106,7 +167,7 @@ export default function App() {
 
           {currentPage === 'builder' && (
             <TaskBuilderPage
-              onSaveTask={(taskData) => {
+              onSaveTask={() => {
                 showNotification('Task definition saved successfully!');
                 setCurrentPage('tasks');
               }}

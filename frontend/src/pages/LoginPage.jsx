@@ -1,19 +1,44 @@
 import React, { useState } from 'react';
-import { Lock, Radio, ShieldCheck, Terminal, User } from 'lucide-react';
+import { Lock, Radio, ShieldCheck, Terminal, User, AlertCircle } from 'lucide-react';
+import { loginApi } from '../services/apiService';
 
 export default function LoginPage({ onLoginSuccess }) {
   const [username, setUsername] = useState('admin');
   const [password, setPassword] = useState('admin123');
   const [rememberNode, setRememberNode] = useState(true);
   const [loading, setLoading] = useState(false);
+  const [errorMsg, setErrorMsg] = useState('');
 
-  const handleSubmit = (e) => {
+  const handleSubmit = async (e) => {
     e.preventDefault();
+    if (loading) return; // Prevent duplicate submissions
+
+    setErrorMsg('');
     setLoading(true);
-    setTimeout(() => {
+
+    try {
+      const data = await loginApi(username, password);
+      if (data && data.access_token) {
+        localStorage.setItem('access_token', data.access_token);
+        onLoginSuccess();
+      } else {
+        setErrorMsg('Authentication failed: Invalid response from server.');
+      }
+    } catch (err) {
+      if (err.response) {
+        if (err.response.status === 401) {
+          setErrorMsg('Invalid username or password. Please check your credentials.');
+        } else {
+          setErrorMsg(err.response.data?.detail || 'Server returned an authentication error.');
+        }
+      } else if (err.request) {
+        setErrorMsg('Backend server unavailable. Please make sure FastAPI backend is running on http://127.0.0.1:8000.');
+      } else {
+        setErrorMsg('An unexpected error occurred during login.');
+      }
+    } finally {
       setLoading(false);
-      onLoginSuccess();
-    }, 600);
+    }
   };
 
   return (
@@ -60,6 +85,25 @@ export default function LoginPage({ onLoginSuccess }) {
           </p>
         </div>
 
+        {/* User Error Banner */}
+        {errorMsg && (
+          <div style={{
+            backgroundColor: 'rgba(239, 68, 68, 0.12)',
+            border: '1px solid rgba(239, 68, 68, 0.3)',
+            borderRadius: '8px',
+            padding: '0.75rem 1rem',
+            color: '#ef4444',
+            fontSize: '0.82rem',
+            marginBottom: '1.25rem',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '0.5rem'
+          }}>
+            <AlertCircle size={18} style={{ flexShrink: 0 }} />
+            <span>{errorMsg}</span>
+          </div>
+        )}
+
         {/* Login Form */}
         <form onSubmit={handleSubmit}>
           <div style={{ marginBottom: '1.25rem' }}>
@@ -71,6 +115,7 @@ export default function LoginPage({ onLoginSuccess }) {
               <input
                 type="text"
                 required
+                disabled={loading}
                 value={username}
                 onChange={(e) => setUsername(e.target.value)}
                 placeholder="e.g. admin"
@@ -100,6 +145,7 @@ export default function LoginPage({ onLoginSuccess }) {
               <input
                 type="password"
                 required
+                disabled={loading}
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 placeholder="••••••••••••"
@@ -145,7 +191,8 @@ export default function LoginPage({ onLoginSuccess }) {
               justifyContent: 'center',
               padding: '0.875rem',
               fontSize: '0.95rem',
-              borderRadius: '10px'
+              borderRadius: '10px',
+              opacity: loading ? 0.7 : 1
             }}
           >
             {loading ? (
