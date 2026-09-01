@@ -25,9 +25,12 @@ from sqlalchemy.orm import Session
 from database import engine, Base, SessionLocal, get_db
 import models
 import auth_router
+import tasks_router
+import devices_router
+import runs_router
 from security import get_password_hash
 
-# Automatically create all SQLite tables on startup
+# Automatically create all SQLite tables (users, devices, tasks, runs, run_events) on startup
 Base.metadata.create_all(bind=engine)
 
 # Seed default admin user if database is empty
@@ -71,8 +74,11 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Include Authentication Router
+# Include Routers
 app.include_router(auth_router.router)
+app.include_router(tasks_router.router)
+app.include_router(devices_router.router)
+app.include_router(runs_router.router)
 
 
 @app.get("/")
