@@ -23,7 +23,6 @@ public class SpotifyLauncher {
             context.getPackageManager().getPackageInfo(SPOTIFY_PACKAGE, 0);
             return true;
         } catch (PackageManager.NameNotFoundException e) {
-            // Fallback check for Android 11+ package visibility boundaries
             Intent launchIntent = context.getPackageManager().getLaunchIntentForPackage(SPOTIFY_PACKAGE);
             return launchIntent != null;
         }
@@ -41,7 +40,7 @@ public class SpotifyLauncher {
                 return;
             }
 
-            // 2. Check if Spotify is already in the foreground
+            // 2. Check if Spotify is ALREADY currently visible in the foreground
             if (SpotifyAccessibilityService.isSpotifyForeground()) {
                 Log.d(TAG, "Spotify already foreground");
                 Log.d(TAG, "Spotify stable state detected");
@@ -52,20 +51,20 @@ public class SpotifyLauncher {
 
             Log.d(TAG, "Spotify not foreground");
 
-            // 3. Initiate launch via Intent
+            // 3. Initiate launch / bring Spotify to the front
             Intent launchIntent = context.getPackageManager().getLaunchIntentForPackage(SPOTIFY_PACKAGE);
             if (launchIntent == null) {
-                // Fallback explicit main launcher intent
                 launchIntent = new Intent(Intent.ACTION_MAIN);
                 launchIntent.addCategory(Intent.CATEGORY_LAUNCHER);
                 launchIntent.setPackage(SPOTIFY_PACKAGE);
             }
 
-            launchIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_RESET_TASK_IF_NEEDED);
+            // Bring existing running activity to front without resetting state
+            launchIntent.addFlags(Intent.FLAG_ACTIVITY_REORDER_TO_FRONT | Intent.FLAG_ACTIVITY_NEW_TASK);
             Log.d(TAG, "Spotify launch initiated");
             context.startActivity(launchIntent);
 
-            // 4. Poll and wait for stable foreground state
+            // 4. Poll and wait for Spotify to appear on screen and reach stable state
             Log.d(TAG, "Waiting for Spotify");
             long startTime = System.currentTimeMillis();
             boolean foregroundDetected = false;
@@ -78,7 +77,6 @@ public class SpotifyLauncher {
                         Log.d(TAG, "Spotify foreground detected");
                     }
 
-                    // Verify active accessibility node window for UI stability
                     SpotifyAccessibilityService service = SpotifyAccessibilityService.getInstance();
                     if (service != null) {
                         AccessibilityNodeInfo rootNode = service.getRootInActiveWindow();
@@ -89,7 +87,6 @@ public class SpotifyLauncher {
                             break;
                         }
                     } else {
-                        // Service reference unavailable, but package foreground verified
                         stableStateDetected = true;
                         Log.d(TAG, "Spotify stable state detected");
                         break;

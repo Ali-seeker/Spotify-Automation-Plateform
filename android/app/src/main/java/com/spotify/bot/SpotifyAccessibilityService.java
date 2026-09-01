@@ -9,6 +9,7 @@ public class SpotifyAccessibilityService extends AccessibilityService {
 
     public static final String TAG = "SpotifyBotService";
     public static final String SPOTIFY_PACKAGE = "com.spotify.music";
+    public static final String BOT_PACKAGE = "com.spotify.bot";
 
     private static volatile SpotifyAccessibilityService instance;
     private static volatile String currentForegroundPackage = "";
@@ -42,11 +43,6 @@ public class SpotifyAccessibilityService extends AccessibilityService {
         if (info != null) {
             Log.d(TAG, "Config: Feedback Type: " + info.feedbackType);
             Log.d(TAG, "Config: Event Types: " + info.eventTypes);
-            if (info.packageNames != null) {
-                for (String pkg : info.packageNames) {
-                    Log.d(TAG, "Config: Target Package: " + pkg);
-                }
-            }
         }
     }
 
@@ -63,7 +59,9 @@ public class SpotifyAccessibilityService extends AccessibilityService {
                 currentForegroundPackage = packageName;
             }
 
-            Log.d(TAG, String.format("Event: Type [%d] received from package [%s]", eventType, packageName));
+            if (SPOTIFY_PACKAGE.equals(packageName) || BOT_PACKAGE.equals(packageName)) {
+                Log.d(TAG, String.format("Event: Type [%d] received from package [%s]", eventType, packageName));
+            }
         }
     }
 
