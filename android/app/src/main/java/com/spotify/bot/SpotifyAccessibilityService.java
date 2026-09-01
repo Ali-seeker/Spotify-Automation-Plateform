@@ -7,20 +7,37 @@ import android.view.accessibility.AccessibilityEvent;
 
 public class SpotifyAccessibilityService extends AccessibilityService {
 
-    private static final String TAG = "SpotifyBotService";
+    public static final String TAG = "SpotifyBotService";
+    public static final String SPOTIFY_PACKAGE = "com.spotify.music";
+
+    private static volatile SpotifyAccessibilityService instance;
+    private static volatile String currentForegroundPackage = "";
+
+    public static SpotifyAccessibilityService getInstance() {
+        return instance;
+    }
+
+    public static String getCurrentForegroundPackage() {
+        return currentForegroundPackage;
+    }
+
+    public static boolean isSpotifyForeground() {
+        return SPOTIFY_PACKAGE.equals(currentForegroundPackage);
+    }
 
     @Override
     public void onCreate() {
         super.onCreate();
+        instance = this;
         Log.d(TAG, "Lifecycle: Service Created");
     }
 
     @Override
     protected void onServiceConnected() {
         super.onServiceConnected();
+        instance = this;
         Log.d(TAG, "Lifecycle: Service Connected and Bound");
 
-        // Dynamically log configuration details to verify connection settings
         AccessibilityServiceInfo info = getServiceInfo();
         if (info != null) {
             Log.d(TAG, "Config: Feedback Type: " + info.feedbackType);
@@ -35,10 +52,19 @@ public class SpotifyAccessibilityService extends AccessibilityService {
 
     @Override
     public void onAccessibilityEvent(AccessibilityEvent event) {
-        // Log event type and source package to verify listener activity
-        String packageName = event.getPackageName() != null ? event.getPackageName().toString() : "Unknown";
-        int eventType = event.getEventType();
-        Log.d(TAG, String.format("Event: Type [%d] received from package [%s]", eventType, packageName));
+        if (event == null) return;
+
+        CharSequence pkgNameChar = event.getPackageName();
+        if (pkgNameChar != null) {
+            String packageName = pkgNameChar.toString();
+            int eventType = event.getEventType();
+
+            if (eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) {
+                currentForegroundPackage = packageName;
+            }
+
+            Log.d(TAG, String.format("Event: Type [%d] received from package [%s]", eventType, packageName));
+        }
     }
 
     @Override
@@ -49,12 +75,14 @@ public class SpotifyAccessibilityService extends AccessibilityService {
     @Override
     public boolean onUnbind(android.content.Intent intent) {
         Log.d(TAG, "Lifecycle: Service Unbound");
+        instance = null;
         return super.onUnbind(intent);
     }
 
     @Override
     public void onDestroy() {
         Log.d(TAG, "Lifecycle: Service Destroyed");
+        instance = null;
         super.onDestroy();
     }
 }
