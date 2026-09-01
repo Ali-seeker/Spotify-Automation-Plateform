@@ -239,7 +239,9 @@ public class SpotifyClicker {
             "com.spotify.music:id/query",
             "com.spotify.music:id/find_search_field",
             "com.spotify.music:id/search_edit_text",
-            "com.spotify.music:id/search_text_input"
+            "com.spotify.music:id/search_text_input",
+            "com.spotify.music:id/search_tab",
+            "com.spotify.music:id/bottom_navigation_search"
         };
 
         for (String id : viewIds) {
@@ -250,9 +252,23 @@ public class SpotifyClicker {
             }
         }
 
-        List<AccessibilityNodeInfo> textNodes = root.findAccessibilityNodeInfosByText("What do you want to listen to?");
-        if (textNodes != null && !textNodes.isEmpty()) {
-            for (AccessibilityNodeInfo n : textNodes) n.recycle();
+        String[] texts = new String[] {
+            "What do you want to listen to?",
+            "Search",
+            "Browse all",
+            "Explore"
+        };
+
+        for (String t : texts) {
+            List<AccessibilityNodeInfo> textNodes = root.findAccessibilityNodeInfosByText(t);
+            if (textNodes != null && !textNodes.isEmpty()) {
+                for (AccessibilityNodeInfo n : textNodes) n.recycle();
+                return true;
+            }
+        }
+
+        CharSequence pkg = root.getPackageName();
+        if (pkg != null && SPOTIFY_PACKAGE.equals(pkg.toString())) {
             return true;
         }
 
