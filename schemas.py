@@ -105,3 +105,15 @@ class RunResponse(BaseModel):
     start_time: Optional[datetime] = None
     end_time: Optional[datetime] = None
     events: List[RunEventResponse] = []
+
+# --- Command Trigger Schemas ---
+class SendCommandRequest(BaseModel):
+    task_id: str = Field(..., description="ID or name of the task to execute", min_length=1)
+    device_id: str = Field(..., description="ID of the target device", min_length=1)
+
+class SendCommandResponse(BaseModel):
+    command_id: str
+    task_id: str
+    device_id: str
+    run_id: str
+    status: str = "QUEUED"
