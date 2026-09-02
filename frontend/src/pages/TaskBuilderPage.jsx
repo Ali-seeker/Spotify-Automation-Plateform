@@ -1,31 +1,99 @@
 import React, { useState } from 'react';
-import { Code, Play, Save, Sliders, Terminal, Zap } from 'lucide-react';
+import { AlertCircle, Code, Play, Save, Sliders, Terminal, Zap, CheckCircle2, RefreshCw } from 'lucide-react';
+import { createTaskApi } from '../services/apiService';
 
-export default function TaskBuilderPage({ onSaveTask, onLaunchTask }) {
-  const [taskName, setTaskName] = useState('Search & Play Top Track');
+export default function TaskBuilderPage({ onSaveTaskSuccess, onLaunchTask }) {
+  const [taskName, setTaskName] = useState('');
   const [actionType, setActionType] = useState('SEARCH_AND_PLAY');
-  const [searchQuery, setSearchQuery] = useState('Atif Aslam');
-  const [timeoutSec, setTimeoutSec] = useState(10);
-  const [autoPlay, setAutoPlay] = useState(true);
-  const [verifyState, setVerifyState] = useState(true);
-  const [targetDevice, setTargetDevice] = useState('dev_infinix_x6817');
+  const [searchQuery, setSearchQuery] = useState('');
+  const [playDuration, setPlayDuration] = useState('60');
+  const [likeProbability, setLikeProbability] = useState('0.8');
+  const [skipProbability, setSkipProbability] = useState('0.2');
 
-  const jsonPreview = {
-    task_name: taskName,
-    action_type: actionType,
-    search_query: searchQuery,
-    action_params: {
-      timeout_sec: Number(timeoutSec),
-      auto_play: autoPlay,
-      verify_state: verifyState,
-      target_device: targetDevice
-    },
-    created_at: new Date().toISOString()
+  const [errors, setErrors] = useState({});
+  const [loading, setLoading] = useState(false);
+  const [serverError, setServerError] = useState('');
+  const [successMsg, setSuccessMsg] = useState('');
+
+  const isSearchRequired = ['SEARCH_AND_PLAY', 'FOLLOW_ARTIST', 'SAVE_TRACK'].includes(actionType);
+
+  const validateForm = () => {
+    const errs = {};
+    if (!taskName.trim()) {
+      errs.taskName = 'Task Designation Name is required';
+    }
+    if (!actionType) {
+      errs.actionType = 'Action Type is required';
+    }
+    if (isSearchRequired && !searchQuery.trim()) {
+      errs.searchQuery = `Target Search Query is required for ${actionType} action type`;
+    }
+    
+    // Validate probabilities if entered
+    if (likeProbability !== '' && (isNaN(likeProbability) || Number(likeProbability) < 0 || Number(likeProbability) > 1)) {
+      errs.likeProbability = 'Like probability must be between 0.0 and 1.0';
+    }
+    if (skipProbability !== '' && (isNaN(skipProbability) || Number(skipProbability) < 0 || Number(skipProbability) > 1)) {
+      errs.skipProbability = 'Skip probability must be between 0.0 and 1.0';
+    }
+    if (playDuration !== '' && (isNaN(playDuration) || Number(playDuration) < 0)) {
+      errs.playDuration = 'Duration must be a positive number';
+    }
+
+    setErrors(errs);
+    return Object.keys(errs).length === 0;
   };
 
-  const handleSave = (e) => {
+  const jsonPreview = {
+    task_name: taskName || 'Unnamed Task',
+    action_type: actionType,
+    search_query: searchQuery || null,
+    action_params: {
+      play_duration: playDuration ? Number(playDuration) : 60,
+      like_probability: likeProbability ? Number(likeProbability) : 0.8,
+      skip_probability: skipProbability ? Number(skipProbability) : 0.2
+    }
+  };
+
+  const handleSubmit = async (e) => {
     e.preventDefault();
-    onSaveTask(jsonPreview);
+    setServerError('');
+    setSuccessMsg('');
+
+    if (!validateForm()) {
+      return;
+    }
+
+    setLoading(true);
+
+    const payload = {
+      task_name: taskName.trim(),
+      action_type: actionType,
+      search_query: searchQuery.trim() || null,
+      action_params: {
+        play_duration: playDuration ? Number(playDuration) : 60,
+        like_probability: likeProbability ? Number(likeProbability) : 0.8,
+        skip_probability: skipProbability ? Number(skipProbability) : 0.2
+      }
+    };
+
+    try {
+      const createdTask = await createTaskApi(payload);
+      setSuccessMsg(`Task "${createdTask.task_name}" created successfully (ID #${createdTask.id})`);
+      setTimeout(() => {
+        if (onSaveTaskSuccess) {
+          onSaveTaskSuccess(createdTask);
+        }
+      }, 1000);
+    } catch (err) {
+      if (err.response && err.response.data && err.response.data.detail) {
+        setServerError(typeof err.response.data.detail === 'string' ? err.response.data.detail : 'Failed to create task.');
+      } else {
+        setServerError('Network or backend server error occurred.');
+      }
+    } finally {
+      setLoading(false);
+    }
   };
 
   return (
@@ -34,9 +102,46 @@ export default function TaskBuilderPage({ onSaveTask, onLaunchTask }) {
       <div style={{ marginBottom: '1.5rem' }}>
         <h3 style={{ fontSize: '1.25rem', fontWeight: 700, color: '#fff' }}>Task Builder & Action Configurator</h3>
         <p style={{ fontSize: '0.85rem', color: '#9ca3af', marginTop: '0.2rem' }}>
-          Define Spotify UI automation parameters, node action targets, and payload schemas
+          Define Spotify UI automation task definitions, target queries, and action parameters
         </p>
       </div>
+
+      {/* Server Error / Success Banners */}
+      {serverError && (
+        <div style={{
+          backgroundColor: 'rgba(239, 68, 68, 0.12)',
+          border: '1px solid rgba(239, 68, 68, 0.3)',
+          borderRadius: '8px',
+          padding: '0.75rem 1rem',
+          color: '#ef4444',
+          fontSize: '0.82rem',
+          marginBottom: '1.25rem',
+          display: 'flex',
+          alignItems: 'center',
+          gap: '0.5rem'
+        }}>
+          <AlertCircle size={18} />
+          <span>{serverError}</span>
+        </div>
+      )}
+
+      {successMsg && (
+        <div style={{
+          backgroundColor: 'rgba(16, 185, 129, 0.12)',
+          border: '1px solid rgba(16, 185, 129, 0.3)',
+          borderRadius: '8px',
+          padding: '0.75rem 1rem',
+          color: '#10b981',
+          fontSize: '0.82rem',
+          marginBottom: '1.25rem',
+          display: 'flex',
+          alignItems: 'center',
+          gap: '0.5rem'
+        }}>
+          <CheckCircle2 size={18} />
+          <span>{successMsg}</span>
+        </div>
+      )}
 
       {/* 2-Column Grid */}
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1.5rem' }}>
@@ -47,20 +152,24 @@ export default function TaskBuilderPage({ onSaveTask, onLaunchTask }) {
             <h4 style={{ fontSize: '1rem', fontWeight: 700, color: '#fff' }}>Pipeline Parameters</h4>
           </div>
 
-          <form onSubmit={handleSave}>
+          <form onSubmit={handleSubmit} noValidate>
+            {/* Task Name */}
             <div style={{ marginBottom: '1.25rem' }}>
               <label style={{ display: 'block', fontSize: '0.78rem', fontWeight: 600, color: '#d1d5db', marginBottom: '0.4rem' }}>
-                Task Designation Name
+                Task Designation Name <span style={{ color: '#ef4444' }}>*</span>
               </label>
               <input
                 type="text"
-                required
                 value={taskName}
-                onChange={(e) => setTaskName(e.target.value)}
+                onChange={(e) => {
+                  setTaskName(e.target.value);
+                  if (errors.taskName) setErrors({ ...errors, taskName: null });
+                }}
+                placeholder="e.g. Play Playlist: Chill Hits"
                 style={{
                   width: '100%',
                   backgroundColor: 'rgba(0, 0, 0, 0.4)',
-                  border: '1px solid rgba(255, 255, 255, 0.1)',
+                  border: errors.taskName ? '1px solid #ef4444' : '1px solid rgba(255, 255, 255, 0.1)',
                   borderRadius: '8px',
                   padding: '0.75rem',
                   color: '#fff',
@@ -68,19 +177,28 @@ export default function TaskBuilderPage({ onSaveTask, onLaunchTask }) {
                   outline: 'none'
                 }}
               />
+              {errors.taskName && (
+                <div style={{ color: '#ef4444', fontSize: '0.75rem', marginTop: '0.3rem' }}>
+                  {errors.taskName}
+                </div>
+              )}
             </div>
 
+            {/* Action Type */}
             <div style={{ marginBottom: '1.25rem' }}>
               <label style={{ display: 'block', fontSize: '0.78rem', fontWeight: 600, color: '#d1d5db', marginBottom: '0.4rem' }}>
-                Action Type Template
+                Action Type Template <span style={{ color: '#ef4444' }}>*</span>
               </label>
               <select
                 value={actionType}
-                onChange={(e) => setActionType(e.target.value)}
+                onChange={(e) => {
+                  setActionType(e.target.value);
+                  if (errors.actionType) setErrors({ ...errors, actionType: null });
+                }}
                 style={{
                   width: '100%',
                   backgroundColor: 'rgba(0, 0, 0, 0.4)',
-                  border: '1px solid rgba(255, 255, 255, 0.1)',
+                  border: errors.actionType ? '1px solid #ef4444' : '1px solid rgba(255, 255, 255, 0.1)',
                   borderRadius: '8px',
                   padding: '0.75rem',
                   color: '#fff',
@@ -88,27 +206,36 @@ export default function TaskBuilderPage({ onSaveTask, onLaunchTask }) {
                   outline: 'none'
                 }}
               >
-                <option value="SEARCH_AND_PLAY">SEARCH_AND_PLAY — Search & Play Track</option>
-                <option value="LIKE_TRACK">LIKE_TRACK — Like Track & Save to Library</option>
-                <option value="FOLLOW_ARTIST">FOLLOW_ARTIST — Follow Artist Page</option>
-                <option value="SKIP_TRACK">SKIP_TRACK — Skip Next Track</option>
-                <option value="SAVE_TRACK">SAVE_TRACK — Save Track to Liked Songs</option>
+                <option value="SEARCH_AND_PLAY">SEARCH_AND_PLAY — Search & Play Target</option>
+                <option value="LIKE_CURRENT_TRACK">LIKE_CURRENT_TRACK — Like Playing Track</option>
+                <option value="FOLLOW_ARTIST">FOLLOW_ARTIST — Follow Target Artist</option>
+                <option value="SKIP_TRACK">SKIP_TRACK — Skip Track on Queue</option>
+                <option value="SAVE_TRACK">SAVE_TRACK — Save Track to Library</option>
               </select>
+              {errors.actionType && (
+                <div style={{ color: '#ef4444', fontSize: '0.75rem', marginTop: '0.3rem' }}>
+                  {errors.actionType}
+                </div>
+              )}
             </div>
 
+            {/* Search Query */}
             <div style={{ marginBottom: '1.25rem' }}>
               <label style={{ display: 'block', fontSize: '0.78rem', fontWeight: 600, color: '#d1d5db', marginBottom: '0.4rem' }}>
-                Target Search Query
+                Target Search Query {isSearchRequired ? <span style={{ color: '#ef4444' }}>*</span> : '(Optional)'}
               </label>
               <input
                 type="text"
                 value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
+                onChange={(e) => {
+                  setSearchQuery(e.target.value);
+                  if (errors.searchQuery) setErrors({ ...errors, searchQuery: null });
+                }}
                 placeholder="e.g. Atif Aslam - Tu Jaane Na"
                 style={{
                   width: '100%',
                   backgroundColor: 'rgba(0, 0, 0, 0.4)',
-                  border: '1px solid rgba(255, 255, 255, 0.1)',
+                  border: errors.searchQuery ? '1px solid #ef4444' : '1px solid rgba(255, 255, 255, 0.1)',
                   borderRadius: '8px',
                   padding: '0.75rem',
                   color: '#fff',
@@ -116,88 +243,120 @@ export default function TaskBuilderPage({ onSaveTask, onLaunchTask }) {
                   outline: 'none'
                 }}
               />
+              {errors.searchQuery && (
+                <div style={{ color: '#ef4444', fontSize: '0.75rem', marginTop: '0.3rem' }}>
+                  {errors.searchQuery}
+                </div>
+              )}
             </div>
 
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem', marginBottom: '1.25rem' }}>
+            {/* Action Parameters Grid */}
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '0.75rem', marginBottom: '1.5rem' }}>
               <div>
-                <label style={{ display: 'block', fontSize: '0.78rem', fontWeight: 600, color: '#d1d5db', marginBottom: '0.4rem' }}>
-                  Execution Timeout (sec)
+                <label style={{ display: 'block', fontSize: '0.72rem', fontWeight: 600, color: '#d1d5db', marginBottom: '0.3rem' }}>
+                  Play Duration (sec)
                 </label>
                 <input
                   type="number"
-                  value={timeoutSec}
-                  onChange={(e) => setTimeoutSec(e.target.value)}
+                  value={playDuration}
+                  onChange={(e) => {
+                    setPlayDuration(e.target.value);
+                    if (errors.playDuration) setErrors({ ...errors, playDuration: null });
+                  }}
                   style={{
                     width: '100%',
                     backgroundColor: 'rgba(0, 0, 0, 0.4)',
-                    border: '1px solid rgba(255, 255, 255, 0.1)',
+                    border: errors.playDuration ? '1px solid #ef4444' : '1px solid rgba(255, 255, 255, 0.1)',
                     borderRadius: '8px',
-                    padding: '0.75rem',
+                    padding: '0.6rem',
                     color: '#fff',
-                    outline: 'none'
+                    outline: 'none',
+                    fontSize: '0.82rem'
                   }}
                 />
+                {errors.playDuration && (
+                  <div style={{ color: '#ef4444', fontSize: '0.68rem', marginTop: '0.2rem' }}>
+                    {errors.playDuration}
+                  </div>
+                )}
               </div>
 
               <div>
-                <label style={{ display: 'block', fontSize: '0.78rem', fontWeight: 600, color: '#d1d5db', marginBottom: '0.4rem' }}>
-                  Target Android Node
+                <label style={{ display: 'block', fontSize: '0.72rem', fontWeight: 600, color: '#d1d5db', marginBottom: '0.3rem' }}>
+                  Like Probability
                 </label>
-                <select
-                  value={targetDevice}
-                  onChange={(e) => setTargetDevice(e.target.value)}
+                <input
+                  type="number"
+                  step="0.1"
+                  value={likeProbability}
+                  onChange={(e) => {
+                    setLikeProbability(e.target.value);
+                    if (errors.likeProbability) setErrors({ ...errors, likeProbability: null });
+                  }}
                   style={{
                     width: '100%',
                     backgroundColor: 'rgba(0, 0, 0, 0.4)',
-                    border: '1px solid rgba(255, 255, 255, 0.1)',
+                    border: errors.likeProbability ? '1px solid #ef4444' : '1px solid rgba(255, 255, 255, 0.1)',
                     borderRadius: '8px',
-                    padding: '0.75rem',
+                    padding: '0.6rem',
                     color: '#fff',
-                    outline: 'none'
+                    outline: 'none',
+                    fontSize: '0.82rem'
                   }}
-                >
-                  <option value="dev_infinix_x6817">Infinix HOT 12 Pro (ONLINE)</option>
-                  <option value="dev_samsung_s21">Samsung Galaxy S21 (BUSY)</option>
-                  <option value="dev_pixel_6">Google Pixel 6 Pro (ONLINE)</option>
-                </select>
+                />
+                {errors.likeProbability && (
+                  <div style={{ color: '#ef4444', fontSize: '0.68rem', marginTop: '0.2rem' }}>
+                    {errors.likeProbability}
+                  </div>
+                )}
+              </div>
+
+              <div>
+                <label style={{ display: 'block', fontSize: '0.72rem', fontWeight: 600, color: '#d1d5db', marginBottom: '0.3rem' }}>
+                  Skip Probability
+                </label>
+                <input
+                  type="number"
+                  step="0.1"
+                  value={skipProbability}
+                  onChange={(e) => {
+                    setSkipProbability(e.target.value);
+                    if (errors.skipProbability) setErrors({ ...errors, skipProbability: null });
+                  }}
+                  style={{
+                    width: '100%',
+                    backgroundColor: 'rgba(0, 0, 0, 0.4)',
+                    border: errors.skipProbability ? '1px solid #ef4444' : '1px solid rgba(255, 255, 255, 0.1)',
+                    borderRadius: '8px',
+                    padding: '0.6rem',
+                    color: '#fff',
+                    outline: 'none',
+                    fontSize: '0.82rem'
+                  }}
+                />
+                {errors.skipProbability && (
+                  <div style={{ color: '#ef4444', fontSize: '0.68rem', marginTop: '0.2rem' }}>
+                    {errors.skipProbability}
+                  </div>
+                )}
               </div>
             </div>
 
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem', marginBottom: '1.5rem' }}>
-              <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.82rem', color: '#d1d5db', cursor: 'pointer' }}>
-                <input
-                  type="checkbox"
-                  checked={autoPlay}
-                  onChange={(e) => setAutoPlay(e.target.checked)}
-                  style={{ accentColor: '#1db954', width: '16px', height: '16px' }}
-                />
-                <span>Auto-start playback on target item click</span>
-              </label>
-
-              <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.82rem', color: '#d1d5db', cursor: 'pointer' }}>
-                <input
-                  type="checkbox"
-                  checked={verifyState}
-                  onChange={(e) => setVerifyState(e.target.checked)}
-                  style={{ accentColor: '#1db954', width: '16px', height: '16px' }}
-                />
-                <span>Verify post-click UI state change (Bounded 1s Retry)</span>
-              </label>
-            </div>
-
             <div style={{ display: 'flex', gap: '0.75rem' }}>
-              <button type="submit" className="btn-secondary" style={{ flex: 1, justifyContent: 'center' }}>
-                <Save size={16} />
-                <span>SAVE DEFINITION</span>
-              </button>
               <button
-                type="button"
-                onClick={() => onLaunchTask(jsonPreview)}
+                type="submit"
+                disabled={loading}
                 className="btn-spotify"
-                style={{ flex: 1, justifyContent: 'center' }}
+                style={{ flex: 1, justifyContent: 'center', opacity: loading ? 0.7 : 1 }}
               >
-                <Zap size={16} fill="#000" />
-                <span>EXECUTE NOW</span>
+                {loading ? (
+                  <span>SAVING TASK...</span>
+                ) : (
+                  <>
+                    <Save size={16} fill="#000" />
+                    <span>SAVE DEFINITION (POST /tasks)</span>
+                  </>
+                )}
               </button>
             </div>
           </form>
@@ -208,7 +367,7 @@ export default function TaskBuilderPage({ onSaveTask, onLaunchTask }) {
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '1rem' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
               <Terminal size={18} color="#10b981" />
-              <h4 style={{ fontSize: '1rem', fontWeight: 700, color: '#fff' }}>Node Output Feed Preview</h4>
+              <h4 style={{ fontSize: '1rem', fontWeight: 700, color: '#fff' }}>POST /tasks Payload Preview</h4>
             </div>
             <span className="font-mono" style={{ fontSize: '0.72rem', color: '#10b981' }}>JSON PROTOCOL v1.0</span>
           </div>

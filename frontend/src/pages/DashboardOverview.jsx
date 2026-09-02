@@ -8,7 +8,8 @@ import {
   Server, 
   Smartphone, 
   Zap,
-  RefreshCw
+  RefreshCw,
+  ListTodo
 } from 'lucide-react';
 import { getDevicesApi, getTasksApi, getRunsApi } from '../services/apiService';
 import { useFrontendWebSocket } from '../hooks/useFrontendWebSocket';
@@ -45,6 +46,16 @@ export default function DashboardOverview({ onNavigate }) {
     }
   };
 
+  const formatDate = (dateStr) => {
+    if (!dateStr) return 'N/A';
+    try {
+      const d = new Date(dateStr);
+      return d.toLocaleDateString() + ' ' + d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    } catch (e) {
+      return dateStr;
+    }
+  };
+
   // Merge dynamic WebSocket status updates into devices array
   const mergedDevices = devices.map((d) => {
     const update = deviceUpdates[d.device_id];
@@ -58,7 +69,7 @@ export default function DashboardOverview({ onNavigate }) {
 
   const metrics = [
     { title: 'Connected Devices', value: mergedDevices.length, sub: `${onlineDevicesCount} ONLINE • ${mergedDevices.length - onlineDevicesCount} OFFLINE`, icon: Smartphone, color: '#10b981' },
-    { title: 'Running Tasks', value: runningTasksCount, sub: 'Active execution sessions', icon: Activity, color: '#3b82f6' },
+    { title: 'Configured Tasks', value: tasks.length, sub: `${tasks.length} total task pipelines`, icon: ListTodo, color: '#3b82f6' },
     { title: 'Completed Runs', value: completedRunsCount, sub: 'Historical successful runs', icon: CheckCircle2, color: '#1db954' },
     { title: 'Failed Execution', value: failedRunsCount, sub: 'Diagnostic review required', icon: AlertCircle, color: '#ef4444' },
   ];
@@ -104,30 +115,30 @@ export default function DashboardOverview({ onNavigate }) {
         })}
       </div>
 
-      {/* Main Grid: Active Cluster Sessions & Live Feed */}
+      {/* Main Grid: Configured Automation Tasks & Live Event Stream */}
       <div style={{
         display: 'grid',
         gridTemplateColumns: '2fr 1fr',
         gap: '1.5rem'
       }}>
-        {/* Left: Active Cluster Sessions & Device Summary */}
+        {/* Left: Configured Tasks Overview */}
         <div className="glass-panel" style={{ padding: '1.5rem' }}>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '1.25rem' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: '0.625rem' }}>
-              <Server size={20} color="#1db954" />
-              <h3 style={{ fontSize: '1.1rem', fontWeight: 700, color: '#fff' }}>Cluster Device Overview</h3>
+              <ListTodo size={20} color="#1db954" />
+              <h3 style={{ fontSize: '1.1rem', fontWeight: 700, color: '#fff' }}>Automation Task Pipelines</h3>
             </div>
-            <button onClick={() => onNavigate('devices')} className="btn-secondary" style={{ padding: '0.375rem 0.75rem', fontSize: '0.78rem' }}>
-              Manage Devices ({mergedDevices.length})
+            <button onClick={() => onNavigate('tasks')} className="btn-secondary" style={{ padding: '0.375rem 0.75rem', fontSize: '0.78rem' }}>
+              View All Tasks ({tasks.length})
             </button>
           </div>
 
           {loading ? (
             <div style={{ padding: '2rem', textAlign: 'center', color: '#9ca3af' }}>
               <RefreshCw size={24} className="spin" style={{ marginBottom: '0.5rem' }} />
-              <div>Fetching cluster devices from backend database...</div>
+              <div>Fetching tasks from backend database...</div>
             </div>
-          ) : mergedDevices.length === 0 ? (
+          ) : tasks.length === 0 ? (
             <div style={{
               padding: '2.5rem 1.5rem',
               textAlign: 'center',
@@ -135,40 +146,44 @@ export default function DashboardOverview({ onNavigate }) {
               borderRadius: '10px',
               border: '1px border-dashed rgba(255, 255, 255, 0.1)'
             }}>
-              <Smartphone size={32} color="#6b7280" style={{ marginBottom: '0.75rem' }} />
-              <h4 style={{ color: '#fff', fontSize: '1rem', fontWeight: 600 }}>No Devices Registered</h4>
+              <ListTodo size={32} color="#6b7280" style={{ marginBottom: '0.75rem' }} />
+              <h4 style={{ color: '#fff', fontSize: '1rem', fontWeight: 600 }}>No Automation Tasks</h4>
               <p style={{ color: '#9ca3af', fontSize: '0.82rem', marginTop: '0.25rem', marginBottom: '1rem' }}>
-                No Android devices are currently registered in the database.
+                No task definitions exist in the database yet.
               </p>
-              <button onClick={() => onNavigate('devices')} className="btn-spotify" style={{ fontSize: '0.8rem' }}>
-                Go to Devices & Pair Node
+              <button onClick={() => onNavigate('builder')} className="btn-spotify" style={{ fontSize: '0.8rem' }}>
+                + Create Automation Task
               </button>
             </div>
           ) : (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-              {mergedDevices.slice(0, 4).map((dev) => (
-                <div key={dev.id || dev.device_id} style={{
-                  padding: '1.25rem',
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.875rem' }}>
+              {tasks.slice(0, 5).map((t) => (
+                <div key={t.id} style={{
+                  padding: '1rem 1.25rem',
                   borderRadius: '10px',
                   backgroundColor: 'rgba(0, 0, 0, 0.3)',
-                  border: '1px solid rgba(255, 255, 255, 0.06)'
+                  border: '1px solid rgba(255, 255, 255, 0.06)',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between'
                 }}>
-                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '0.5rem' }}>
-                    <div>
-                      <span className="font-mono" style={{ fontSize: '0.85rem', color: '#1db954', fontWeight: 700, marginRight: '0.5rem' }}>
-                        {dev.device_id}
-                      </span>
+                  <div>
+                    <div style={{ fontSize: '0.9rem', fontWeight: 600, color: '#fff', marginBottom: '0.2rem' }}>
+                      {t.task_name}
                     </div>
-                    <span className={`badge ${dev.status === 'ONLINE' || dev.status === 'IDLE' ? 'badge-online' : dev.status === 'BUSY' ? 'badge-running' : 'badge-offline'}`}>
-                      <span className="pulse-dot pulse-dot-green" style={{ width: '6px', height: '6px' }}></span> {dev.status}
-                    </span>
+                    <div style={{ fontSize: '0.75rem', color: '#9ca3af', display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+                      <span>Action: <strong style={{ color: '#3b82f6' }}>{t.action_type}</strong></span>
+                      {t.search_query && <span>Query: <strong style={{ color: '#d1d5db' }}>{t.search_query}</strong></span>}
+                    </div>
                   </div>
 
-                  <div style={{ fontSize: '0.78rem', color: '#9ca3af', display: 'flex', justifyContent: 'space-between' }}>
-                    <span>Last Seen: <strong style={{ color: '#d1d5db' }}>{dev.last_seen || 'N/A'}</strong></span>
-                    <span onClick={() => onNavigate('devices')} style={{ color: '#3b82f6', cursor: 'pointer', fontWeight: 600 }}>
-                      Inspect Device →
+                  <div style={{ textAlign: 'right' }}>
+                    <span className="font-mono" style={{ fontSize: '0.75rem', color: '#6b7280', display: 'block', marginBottom: '0.25rem' }}>
+                      {formatDate(t.created_at)}
                     </span>
+                    <button onClick={() => onNavigate('tasks')} style={{ background: 'none', border: 'none', color: '#1db954', cursor: 'pointer', fontSize: '0.75rem', fontWeight: 600 }}>
+                      View Details →
+                    </button>
                   </div>
                 </div>
               ))}

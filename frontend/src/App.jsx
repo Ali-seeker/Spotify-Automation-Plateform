@@ -167,8 +167,8 @@ export default function App() {
 
           {currentPage === 'builder' && (
             <TaskBuilderPage
-              onSaveTask={() => {
-                showNotification('Task definition saved successfully!');
+              onSaveTaskSuccess={(createdTask) => {
+                showNotification(`Task "${createdTask.task_name}" created successfully!`);
                 setCurrentPage('tasks');
               }}
               onLaunchTask={handleLaunchTask}

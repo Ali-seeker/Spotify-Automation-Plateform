@@ -33,6 +33,14 @@ export async function getTasksApi() {
 }
 
 /**
+ * Create a new task definition via POST /tasks
+ */
+export async function createTaskApi(taskData) {
+  const response = await api.post('/tasks', taskData);
+  return response.data;
+}
+
+/**
  * Fetch execution run logs from database
  */
 export async function getRunsApi() {

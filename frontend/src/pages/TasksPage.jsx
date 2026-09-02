@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { ListTodo, Play, Plus, RefreshCw, AlertCircle } from 'lucide-react';
+import { ListTodo, Play, Plus, RefreshCw, AlertCircle, Clock } from 'lucide-react';
 import { getTasksApi } from '../services/apiService';
 
 export default function TasksPage({ onNavigateToBuilder, onLaunchTask }) {
@@ -21,6 +21,16 @@ export default function TasksPage({ onNavigateToBuilder, onLaunchTask }) {
       setErrorMsg('Failed to load task library from backend API.');
     } finally {
       setLoading(false);
+    }
+  };
+
+  const formatDate = (dateStr) => {
+    if (!dateStr) return 'N/A';
+    try {
+      const d = new Date(dateStr);
+      return d.toLocaleDateString() + ' ' + d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    } catch (e) {
+      return dateStr;
     }
   };
 
@@ -94,7 +104,8 @@ export default function TasksPage({ onNavigateToBuilder, onLaunchTask }) {
                 <th style={{ padding: '1rem 1.25rem' }}>Task Designation</th>
                 <th style={{ padding: '1rem 1.25rem' }}>Action Type</th>
                 <th style={{ padding: '1rem 1.25rem' }}>Target Search Query</th>
-                <th style={{ padding: '1rem 1.25rem' }}>Database ID</th>
+                <th style={{ padding: '1rem 1.25rem' }}>Parameters</th>
+                <th style={{ padding: '1rem 1.25rem' }}>Created At</th>
                 <th style={{ padding: '1rem 1.25rem', textAlign: 'right' }}>Actions</th>
               </tr>
             </thead>
@@ -103,6 +114,7 @@ export default function TasksPage({ onNavigateToBuilder, onLaunchTask }) {
                 <tr key={task.id} style={{ borderBottom: '1px solid rgba(255, 255, 255, 0.04)', transition: 'background-color 0.15s' }}>
                   <td style={{ padding: '1rem 1.25rem' }}>
                     <div style={{ fontWeight: 600, color: '#fff' }}>{task.task_name}</div>
+                    <div style={{ fontSize: '0.75rem', color: '#6b7280', fontFamily: 'monospace' }}>ID: #{task.id}</div>
                   </td>
 
                   <td style={{ padding: '1rem 1.25rem' }}>
@@ -115,10 +127,25 @@ export default function TasksPage({ onNavigateToBuilder, onLaunchTask }) {
                     {task.search_query || 'N/A'}
                   </td>
 
-                  <td style={{ padding: '1rem 1.25rem' }} className="font-mono">
-                    <span style={{ color: '#3b82f6', backgroundColor: 'rgba(59, 130, 246, 0.1)', padding: '0.2rem 0.5rem', borderRadius: '4px' }}>
-                      #{task.id}
+                  <td style={{ padding: '1rem 1.25rem' }}>
+                    <span style={{
+                      fontSize: '0.75rem',
+                      fontFamily: 'monospace',
+                      color: '#9ca3af',
+                      backgroundColor: 'rgba(0, 0, 0, 0.4)',
+                      padding: '0.2rem 0.5rem',
+                      borderRadius: '4px',
+                      border: '1px solid rgba(255, 255, 255, 0.06)'
+                    }}>
+                      {task.action_params ? JSON.stringify(task.action_params) : '{}'}
                     </span>
+                  </td>
+
+                  <td style={{ padding: '1rem 1.25rem', color: '#9ca3af', fontSize: '0.78rem' }} className="font-mono">
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.3rem' }}>
+                      <Clock size={12} color="#6b7280" />
+                      <span>{formatDate(task.created_at)}</span>
+                    </div>
                   </td>
 
                   <td style={{ padding: '1rem 1.25rem', textAlign: 'right' }}>
