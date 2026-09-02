@@ -41,6 +41,17 @@ export async function createTaskApi(taskData) {
 }
 
 /**
+ * Trigger task execution on target device via POST /send_command
+ */
+export async function sendCommandApi(taskId, deviceId) {
+  const response = await api.post('/send_command', {
+    task_id: String(taskId),
+    device_id: String(deviceId)
+  });
+  return response.data; // { command_id, task_id, device_id, run_id, status }
+}
+
+/**
  * Fetch execution run logs from database
  */
 export async function getRunsApi() {

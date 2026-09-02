@@ -5,13 +5,15 @@ import {
   CheckCircle2, 
   Clock, 
   Radio, 
-  Server, 
   Smartphone, 
   Zap,
   RefreshCw,
-  ListTodo
+  ListTodo,
+  Play,
+  Loader2,
+  XCircle
 } from 'lucide-react';
-import { getDevicesApi, getTasksApi, getRunsApi } from '../services/apiService';
+import { getDevicesApi, getTasksApi, getRunsApi, sendCommandApi } from '../services/apiService';
 import { useFrontendWebSocket } from '../hooks/useFrontendWebSocket';
 
 export default function DashboardOverview({ onNavigate }) {
@@ -20,12 +22,62 @@ export default function DashboardOverview({ onNavigate }) {
   const [runs, setRuns] = useState([]);
   const [loading, setLoading] = useState(true);
   const [errorMsg, setErrorMsg] = useState('');
+  const [selectedDeviceMap, setSelectedDeviceMap] = useState({});
+  const [taskExecutions, setTaskExecutions] = useState({});
 
-  const { isConnected, deviceUpdates, recentEvents } = useFrontendWebSocket();
+  const { isConnected, deviceUpdates, recentEvents, lastEvent } = useFrontendWebSocket();
 
   useEffect(() => {
     loadDashboardData();
   }, []);
+
+  // Listen for real-time WebSocket events to update task execution state
+  useEffect(() => {
+    if (!lastEvent || lastEvent.type !== 'DEVICE_EVENT') return;
+    const { run_id, event_type, payload } = lastEvent;
+    if (!run_id) return;
+
+    setTaskExecutions((prevExecs) => {
+      const targetTaskId = Object.keys(prevExecs).find(
+        (tid) => prevExecs[tid]?.runId === run_id
+      );
+      if (!targetTaskId) return prevExecs;
+
+      const currentExec = prevExecs[targetTaskId];
+      const newSteps = [...(currentExec.steps || [])];
+
+      if (event_type === 'STEP_STARTED' || event_type === 'STEP_OK') {
+        newSteps.push({
+          event_type,
+          action: payload?.action || payload?.step_name || 'Step action',
+          timestamp: new Date().toLocaleTimeString()
+        });
+      } else if (event_type === 'STEP_FAILED') {
+        newSteps.push({
+          event_type: 'STEP_FAILED',
+          reason_code: payload?.reason_code || payload?.error || 'UNEXPECTED_STATE',
+          timestamp: new Date().toLocaleTimeString()
+        });
+      }
+
+      let updatedStatus = currentExec.status;
+      if (event_type === 'COMMAND_DONE') {
+        const finalStatus = lastEvent.status || payload?.status || (payload?.result !== false ? 'SUCCESS' : 'FAILED');
+        updatedStatus = finalStatus === 'SUCCESS' ? 'SUCCESS' : 'FAILED';
+      } else if (event_type === 'STEP_FAILED') {
+        updatedStatus = 'FAILED';
+      }
+
+      return {
+        ...prevExecs,
+        [targetTaskId]: {
+          ...currentExec,
+          status: updatedStatus,
+          steps: newSteps
+        }
+      };
+    });
+  }, [lastEvent]);
 
   const loadDashboardData = async () => {
     setLoading(true);
@@ -39,8 +91,15 @@ export default function DashboardOverview({ onNavigate }) {
       setDevices(devsRes);
       setTasks(tasksRes);
       setRuns(runsRes);
+
+      const defaultDev = devsRes.find((d) => d.status === 'ONLINE' || d.status === 'IDLE')?.device_id || devsRes[0]?.device_id || '';
+      const initialMap = {};
+      tasksRes.forEach((t) => {
+        initialMap[t.id] = defaultDev;
+      });
+      setSelectedDeviceMap(initialMap);
     } catch (err) {
-      setErrorMsg('Failed to load some dashboard data from backend server.');
+      setErrorMsg('Failed to load dashboard data from backend server.');
     } finally {
       setLoading(false);
     }
@@ -56,16 +115,62 @@ export default function DashboardOverview({ onNavigate }) {
     }
   };
 
-  // Merge dynamic WebSocket status updates into devices array
+  // Merge WebSocket device status updates
   const mergedDevices = devices.map((d) => {
     const update = deviceUpdates[d.device_id];
     return update ? { ...d, status: update.status, last_seen: update.last_seen } : d;
   });
 
   const onlineDevicesCount = mergedDevices.filter(d => d.status === 'ONLINE' || d.status === 'IDLE' || d.status === 'BUSY').length;
-  const runningTasksCount = runs.filter(r => r.status === 'RUNNING').length;
   const completedRunsCount = runs.filter(r => r.status === 'SUCCESS').length;
   const failedRunsCount = runs.filter(r => r.status === 'FAILED').length;
+
+  const handleDeviceChange = (taskId, devId) => {
+    setSelectedDeviceMap((prev) => ({ ...prev, [taskId]: devId }));
+  };
+
+  const handleRunNow = async (task) => {
+    const taskId = task.id;
+    const selectedDevId = selectedDeviceMap[taskId];
+
+    if (!selectedDevId) {
+      setTaskExecutions((prev) => ({
+        ...prev,
+        [taskId]: { status: 'FAILED', error: 'No device selected.' }
+      }));
+      return;
+    }
+
+    const devObj = mergedDevices.find((d) => d.device_id === selectedDevId);
+    if (devObj && devObj.status === 'OFFLINE') {
+      setTaskExecutions((prev) => ({
+        ...prev,
+        [taskId]: { status: 'FAILED', error: `Device ${selectedDevId} is OFFLINE.` }
+      }));
+      return;
+    }
+
+    if (taskExecutions[taskId]?.status === 'RUNNING') return;
+
+    setTaskExecutions((prev) => ({
+      ...prev,
+      [taskId]: { runId: null, status: 'RUNNING', steps: [], error: null }
+    }));
+
+    try {
+      const res = await sendCommandApi(taskId, selectedDevId);
+      setTaskExecutions((prev) => ({
+        ...prev,
+        [taskId]: { ...prev[taskId], runId: res.run_id }
+      }));
+    } catch (err) {
+      const detail = err.response?.data?.detail || 'Failed to trigger command.';
+      setTaskExecutions((prev) => ({
+        ...prev,
+        [taskId]: { status: 'FAILED', error: typeof detail === 'string' ? detail : 'DEVICE_OFFLINE' }
+      }));
+    }
+  };
 
   const metrics = [
     { title: 'Connected Devices', value: mergedDevices.length, sub: `${onlineDevicesCount} ONLINE • ${mergedDevices.length - onlineDevicesCount} OFFLINE`, icon: Smartphone, color: '#10b981' },
@@ -121,7 +226,7 @@ export default function DashboardOverview({ onNavigate }) {
         gridTemplateColumns: '2fr 1fr',
         gap: '1.5rem'
       }}>
-        {/* Left: Configured Tasks Overview */}
+        {/* Left: Configured Tasks Overview with Run Now Controls */}
         <div className="glass-panel" style={{ padding: '1.5rem' }}>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '1.25rem' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: '0.625rem' }}>
@@ -157,36 +262,99 @@ export default function DashboardOverview({ onNavigate }) {
             </div>
           ) : (
             <div style={{ display: 'flex', flexDirection: 'column', gap: '0.875rem' }}>
-              {tasks.slice(0, 5).map((t) => (
-                <div key={t.id} style={{
-                  padding: '1rem 1.25rem',
-                  borderRadius: '10px',
-                  backgroundColor: 'rgba(0, 0, 0, 0.3)',
-                  border: '1px solid rgba(255, 255, 255, 0.06)',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'space-between'
-                }}>
-                  <div>
-                    <div style={{ fontSize: '0.9rem', fontWeight: 600, color: '#fff', marginBottom: '0.2rem' }}>
-                      {t.task_name}
-                    </div>
-                    <div style={{ fontSize: '0.75rem', color: '#9ca3af', display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
-                      <span>Action: <strong style={{ color: '#3b82f6' }}>{t.action_type}</strong></span>
-                      {t.search_query && <span>Query: <strong style={{ color: '#d1d5db' }}>{t.search_query}</strong></span>}
-                    </div>
-                  </div>
+              {tasks.slice(0, 5).map((t) => {
+                const taskId = t.id;
+                const execState = taskExecutions[taskId];
+                const isRunning = execState?.status === 'RUNNING';
+                const selectedDev = selectedDeviceMap[taskId] || '';
+                const devObj = mergedDevices.find((d) => d.device_id === selectedDev);
+                const isDevOffline = !devObj || devObj.status === 'OFFLINE';
 
-                  <div style={{ textAlign: 'right' }}>
-                    <span className="font-mono" style={{ fontSize: '0.75rem', color: '#6b7280', display: 'block', marginBottom: '0.25rem' }}>
-                      {formatDate(t.created_at)}
-                    </span>
-                    <button onClick={() => onNavigate('tasks')} style={{ background: 'none', border: 'none', color: '#1db954', cursor: 'pointer', fontSize: '0.75rem', fontWeight: 600 }}>
-                      View Details →
-                    </button>
+                return (
+                  <div key={t.id} style={{
+                    padding: '1rem 1.25rem',
+                    borderRadius: '10px',
+                    backgroundColor: 'rgba(0, 0, 0, 0.3)',
+                    border: '1px solid rgba(255, 255, 255, 0.06)',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: '0.75rem'
+                  }}>
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '0.75rem' }}>
+                      <div>
+                        <div style={{ fontSize: '0.9rem', fontWeight: 600, color: '#fff', marginBottom: '0.2rem' }}>
+                          {t.task_name}
+                        </div>
+                        <div style={{ fontSize: '0.75rem', color: '#9ca3af', display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+                          <span>Action: <strong style={{ color: '#3b82f6' }}>{t.action_type}</strong></span>
+                          {t.search_query && <span>Query: <strong style={{ color: '#d1d5db' }}>{t.search_query}</strong></span>}
+                        </div>
+                      </div>
+
+                      {/* Device Selector & Run Now */}
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                        <select
+                          disabled={isRunning}
+                          value={selectedDev}
+                          onChange={(e) => handleDeviceChange(taskId, e.target.value)}
+                          style={{
+                            backgroundColor: 'rgba(0, 0, 0, 0.5)',
+                            border: '1px solid rgba(255, 255, 255, 0.1)',
+                            borderRadius: '6px',
+                            color: devObj?.status === 'ONLINE' ? '#fff' : '#9ca3af',
+                            fontSize: '0.75rem',
+                            padding: '0.35rem 0.5rem',
+                            outline: 'none'
+                          }}
+                        >
+                          {mergedDevices.map((d) => (
+                            <option key={d.device_id} value={d.device_id} style={{ backgroundColor: '#0b0e17', color: '#fff' }}>
+                              {d.device_id} ({d.status})
+                            </option>
+                          ))}
+                        </select>
+
+                        <button
+                          onClick={() => handleRunNow(t)}
+                          disabled={isRunning || isDevOffline || mergedDevices.length === 0}
+                          className="btn-spotify"
+                          style={{
+                            padding: '0.35rem 0.75rem',
+                            fontSize: '0.75rem',
+                            opacity: isRunning || isDevOffline ? 0.6 : 1,
+                            cursor: isRunning || isDevOffline ? 'not-allowed' : 'pointer'
+                          }}
+                        >
+                          {isRunning ? (
+                            <>
+                              <Loader2 size={12} className="spin" />
+                              <span>RUNNING...</span>
+                            </>
+                          ) : (
+                            <>
+                              <Play size={12} fill="#000" />
+                              <span>RUN NOW</span>
+                            </>
+                          )}
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* Inline Status / Execution Banner */}
+                    {execState?.error && (
+                      <div style={{ fontSize: '0.75rem', color: '#ef4444', backgroundColor: 'rgba(239, 68, 68, 0.1)', padding: '0.35rem 0.6rem', borderRadius: '4px', border: '1px solid rgba(239, 68, 68, 0.3)' }}>
+                        ⚠️ {execState.error}
+                      </div>
+                    )}
+
+                    {execState?.status === 'SUCCESS' && (
+                      <div style={{ fontSize: '0.75rem', color: '#10b981', display: 'flex', alignItems: 'center', gap: '0.3rem' }}>
+                        <CheckCircle2 size={12} /> Execution Completed Successfully (SUCCESS)
+                      </div>
+                    )}
                   </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
           )}
         </div>
@@ -226,7 +394,7 @@ export default function DashboardOverview({ onNavigate }) {
                 <div key={idx} style={{ borderBottom: '1px solid rgba(255, 255, 255, 0.04)', paddingBottom: '0.625rem' }}>
                   <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '0.25rem' }}>
                     <span style={{ color: '#6b7280' }}>Run: {evt.run_id}</span>
-                    <span style={{ color: '#10b981', fontWeight: 700 }}>{evt.event_type}</span>
+                    <span style={{ color: evt.event_type === 'STEP_FAILED' ? '#ef4444' : '#10b981', fontWeight: 700 }}>{evt.event_type}</span>
                   </div>
                   <div style={{ color: '#d1d5db', wordBreak: 'break-word' }}>
                     {JSON.stringify(evt.payload || {})}

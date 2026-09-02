@@ -156,6 +156,7 @@ async def websocket_device_endpoint(websocket: WebSocket, path_device_id: str = 
                 "device_id": device_id,
                 "event_type": msg_type,
                 "run_id": run_id,
+                "status": msg.get("status"),
                 "payload": payload,
                 "timestamp": datetime.now(timezone.utc).isoformat()
             })
