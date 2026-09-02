@@ -7,6 +7,7 @@ export function useFrontendWebSocket() {
   const [isConnected, setIsConnected] = useState(false);
   const [deviceUpdates, setDeviceUpdates] = useState({});
   const [recentEvents, setRecentEvents] = useState([]);
+  const [lastEvent, setLastEvent] = useState(null);
   const socketRef = useRef(null);
 
   useEffect(() => {
@@ -35,6 +36,7 @@ export function useFrontendWebSocket() {
               }
             }));
           } else if (data.type === 'DEVICE_EVENT') {
+            setLastEvent(data);
             setRecentEvents((prev) => [data, ...prev.slice(0, 49)]);
           }
         } catch (e) {
@@ -60,5 +62,5 @@ export function useFrontendWebSocket() {
     };
   }, []);
 
-  return { isConnected, deviceUpdates, recentEvents };
+  return { isConnected, deviceUpdates, recentEvents, lastEvent };
 }
