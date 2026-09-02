@@ -20,7 +20,7 @@ public class SpotifyNavigator {
     private static final String SPOTIFY_PACKAGE = SpotifyAccessibilityService.SPOTIFY_PACKAGE;
 
     private static final long STABILIZATION_TIMEOUT_MS = 3000;
-    private static final long UI_LOAD_WAIT_TIMEOUT_MS = 2500;
+    private static final long UI_LOAD_WAIT_TIMEOUT_MS = 3000;
     private static final long POLL_INTERVAL_MS = 300;
     private static final int MAX_UNKNOWN_RECOVERY_ATTEMPTS = 3;
 
@@ -141,7 +141,7 @@ public class SpotifyNavigator {
                 }
             }
 
-            // 2. Poll for UI tree stabilization after Spotify launch (up to 2.5 seconds)
+            // 2. Poll for UI tree stabilization after Spotify launch (up to 3.0 seconds)
             long startLoad = System.currentTimeMillis();
             AccessibilityNodeInfo root = null;
             SpotifyScreen currentScreen = SpotifyScreen.UNKNOWN_SCREEN;
@@ -154,7 +154,7 @@ public class SpotifyNavigator {
                     currentScreen = detectCurrentScreen(root);
                     targetNode = findTargetNavigationNode(root, targetScreen);
 
-                    if (currentScreen != SpotifyScreen.UNKNOWN_SCREEN || targetNode != null) {
+                    if (targetNode != null || currentScreen != SpotifyScreen.UNKNOWN_SCREEN) {
                         break;
                     }
                 }
@@ -174,8 +174,8 @@ public class SpotifyNavigator {
                 return;
             }
 
-            // 4. If Target Node still not found and screen is UNKNOWN, attempt BACK recovery
-            if (targetNode == null && currentScreen == SpotifyScreen.UNKNOWN_SCREEN) {
+            // 4. If Target Node not found AND not on main bottom nav, attempt BACK recovery
+            if (targetNode == null && currentScreen == SpotifyScreen.UNKNOWN_SCREEN && !hasBottomNavigation(root)) {
                 if (root != null) root.recycle();
                 currentScreen = recoverFromUnknownScreen(service);
 
@@ -193,7 +193,7 @@ public class SpotifyNavigator {
             }
 
             if (targetNode == null) {
-                Log.e(TAG, String.format("[%s] NAVIGATION_FAILED target=%s reason_code=NAVIGATION_FAILED (Node not found)",
+                Log.e(TAG, String.format("[%s] NAVIGATION_FAILED target=%s reason_code=NAVIGATION_FAILED (Target node not found)",
                         getIsoUtcTimestamp(), targetScreen.name()));
                 if (root != null) root.recycle();
                 emitStepFailed(context, runId, "NAVIGATION_FAILED");
@@ -587,28 +587,33 @@ public class SpotifyNavigator {
         String res = resId != null ? resId.toLowerCase() : "";
 
         for (String kw : keywords) {
-            if (desc.contains(kw) || text.contains(kw) || res.contains(kw)) {
+            if (!kw.isEmpty() && (desc.contains(kw) || text.contains(kw) || res.contains(kw))) {
                 return AccessibilityNodeInfo.obtain(node);
             }
         }
 
-        for (int i = 0; i < node.getChildCount(); i++) {
+        int count = node.getChildCount();
+        for (int i = 0; i < count; i++) {
             AccessibilityNodeInfo child = node.getChild(i);
             if (child != null) {
                 AccessibilityNodeInfo result = findNodeByDfs(child, keywords);
+                if (result != null) {
+                    child.recycle();
+                    return result;
+                }
                 child.recycle();
-                if (result != null) return result;
             }
         }
         return null;
     }
 
     private static AccessibilityNodeInfo findClickableAncestor(AccessibilityNodeInfo node) {
-        AccessibilityNodeInfo curr = node;
+        if (node == null) return null;
+        AccessibilityNodeInfo curr = AccessibilityNodeInfo.obtain(node);
         while (curr != null && !curr.isClickable()) {
             AccessibilityNodeInfo parent = curr.getParent();
             if (parent == null) break;
-            if (curr != node) curr.recycle();
+            curr.recycle();
             curr = parent;
         }
         return curr != null ? curr : AccessibilityNodeInfo.obtain(node);
