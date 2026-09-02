@@ -29,12 +29,12 @@ class UserResponse(BaseModel):
 class DeviceCreate(BaseModel):
     device_id: str = Field(..., description="Unique Android device ID", min_length=1)
     status: Optional[str] = "IDLE"
-    capabilities: Optional[Dict[str, Any]] = None
+    capabilities: Optional[Any] = None
     last_seen: Optional[datetime] = None
 
 class DeviceUpdate(BaseModel):
     status: Optional[str] = None
-    capabilities: Optional[Dict[str, Any]] = None
+    capabilities: Optional[Any] = None
     last_seen: Optional[datetime] = None
 
 class DeviceResponse(BaseModel):
@@ -43,7 +43,7 @@ class DeviceResponse(BaseModel):
     id: int
     device_id: str
     status: str
-    capabilities: Optional[Dict[str, Any]] = None
+    capabilities: Optional[Any] = None
     last_seen: Optional[datetime] = None
 
 # --- Task Schemas ---
