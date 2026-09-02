@@ -129,7 +129,7 @@ public class CommandQueueManager {
 
                 // 4. EXECUTE COMMAND LIFE-CYCLE
                 executeCommandWithLatch(command, latch);
-                latch.await(30, TimeUnit.SECONDS); // Wait for async UI callbacks
+                latch.await(35, TimeUnit.SECONDS); // Wait for async UI callbacks
 
             } catch (Throwable t) {
                 Log.e(TAG, String.format("[%s] UNHANDLED_EXCEPTION during command execution for run_id=%s",
@@ -178,7 +178,6 @@ public class CommandQueueManager {
     }
 
     private long parseIsoTimestamp(String timestampStr) throws ParseException {
-        // Clean microsecond precision if present (e.g. .870458+00:00 -> .870+00:00)
         String cleaned = timestampStr.replaceAll("(\\.\\d{3})\\d+", "$1");
         cleaned = cleaned.replace("Z", "+0000");
 
@@ -198,7 +197,6 @@ public class CommandQueueManager {
             } catch (ParseException ignored) {}
         }
 
-        // Fallback to epoch timestamp parse
         return System.currentTimeMillis();
     }
 
@@ -206,8 +204,8 @@ public class CommandQueueManager {
         String runId = command.optString("run_id", "");
         String actionType = command.optString("action_type", "CLICK");
 
-        // Step 1: Initiating Spotify Launch
-        emitStepStarted(runId, 1, "Initiating Spotify Launch");
+        // Step 1: Initiating Spotify Launch & Navigation
+        emitStepStarted(runId, 1, "Initiating Spotify Launch & Navigation");
 
         SpotifyLauncher.launchSpotify(context, (launchSuccess, launchMsg) -> {
             if (!launchSuccess) {
@@ -219,20 +217,27 @@ public class CommandQueueManager {
 
             emitStepOk(runId, 1, "Spotify Launched & Foreground Verified");
 
-            // Step 2: Executing Action
-            emitStepStarted(runId, 2, "Executing " + actionType + " UI action");
-
-            try { Thread.sleep(500); } catch (InterruptedException ignored) {}
-
-            SpotifyClicker.clickSearchWithRetry((clickSuccess, clickMsg, reasonCode) -> {
-                if (clickSuccess) {
-                    emitStepOk(runId, 2, clickMsg);
-                    emitCommandDone(runId, "SUCCESS", true);
-                } else {
-                    emitStepFailed(runId, 2, reasonCode != null ? reasonCode : "UI_ELEMENT_NOT_FOUND");
+            // Step 2: SpotifyNavigator Screen Awareness & Navigation to Search
+            SpotifyNavigator.goToSearch(context, runId, (navSuccess, finalScreen, navReason) -> {
+                if (!navSuccess) {
                     emitCommandDone(runId, "FAILED", false);
+                    latch.countDown();
+                    return;
                 }
-                latch.countDown();
+
+                // Step 3: Executing Action
+                emitStepStarted(runId, 2, "Executing " + actionType + " UI action");
+
+                SpotifyClicker.clickSearchWithRetry((clickSuccess, clickMsg, reasonCode) -> {
+                    if (clickSuccess) {
+                        emitStepOk(runId, 2, clickMsg);
+                        emitCommandDone(runId, "SUCCESS", true);
+                    } else {
+                        emitStepFailed(runId, 2, reasonCode != null ? reasonCode : "UI_ELEMENT_NOT_FOUND");
+                        emitCommandDone(runId, "FAILED", false);
+                    }
+                    latch.countDown();
+                });
             });
         });
     }
