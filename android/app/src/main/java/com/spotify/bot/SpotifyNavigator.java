@@ -19,9 +19,14 @@ public class SpotifyNavigator {
     private static final String TAG = "SpotifyBotNav";
     private static final String SPOTIFY_PACKAGE = SpotifyAccessibilityService.SPOTIFY_PACKAGE;
 
-    private static final long STABILIZATION_TIMEOUT_MS = 3500;
-    private static final long UI_LOAD_WAIT_TIMEOUT_MS = 3000;
-    private static final long POLL_INTERVAL_MS = 300;
+    // --- PACED TIMING CONSTANTS (6-7 Seconds Human Delays) ---
+    private static final long LAUNCH_WAIT_MS = 6000;         // 6.0 seconds wait after Spotify launch
+    private static final long UI_LOAD_WAIT_TIMEOUT_MS = 6000; // 6.0 seconds UI tree stabilization load
+    private static final long POST_CLICK_DELAY_MS = 2500;     // 2.5 seconds wait after clicking navigation node
+    private static final long STABILIZATION_TIMEOUT_MS = 6000; // 6.0 seconds screen stabilization check
+    private static final long BACK_RECOVERY_DELAY_MS = 2000;  // 2.0 seconds wait between slow BACK recovery presses
+    private static final long POLL_INTERVAL_MS = 500;        // 500ms poll interval
+
     private static final int MAX_UNKNOWN_RECOVERY_ATTEMPTS = 3;
 
     public interface NavigationCallback {
@@ -127,12 +132,14 @@ public class SpotifyNavigator {
                 return;
             }
 
-            // 1. Ensure Spotify Foreground
+            // 1. Ensure Spotify Foreground & Paced Launch Wait
             if (!SpotifyAccessibilityService.isSpotifyForeground()) {
-                Log.w(TAG, "Spotify not in foreground. Attempting launch...");
+                Log.w(TAG, String.format("Spotify not in foreground. Launching and waiting %d ms for UI to settle...", LAUNCH_WAIT_MS));
                 final boolean[] launched = {false};
                 SpotifyLauncher.launchSpotify(context, (success, msg) -> launched[0] = success);
-                try { Thread.sleep(1800); } catch (InterruptedException ignored) {}
+                
+                // Wait 6 seconds for Spotify splash screen to complete and main screen to load
+                try { Thread.sleep(LAUNCH_WAIT_MS); } catch (InterruptedException ignored) {}
 
                 if (!SpotifyAccessibilityService.isSpotifyForeground()) {
                     emitStepFailed(context, runId, "SPOTIFY_NOT_FOREGROUND");
@@ -140,10 +147,11 @@ public class SpotifyNavigator {
                     return;
                 }
             } else {
-                try { Thread.sleep(500); } catch (InterruptedException ignored) {}
+                // If Spotify is already in foreground, wait 1.5 seconds for active window tree to settle
+                try { Thread.sleep(1500); } catch (InterruptedException ignored) {}
             }
 
-            // 2. Poll for UI tree stabilization after Spotify launch (up to 3.0 seconds)
+            // 2. Poll for UI tree stabilization & node detection (Up to 6 seconds)
             long startLoad = System.currentTimeMillis();
             AccessibilityNodeInfo root = null;
             SpotifyScreen currentScreen = SpotifyScreen.UNKNOWN_SCREEN;
@@ -163,7 +171,7 @@ public class SpotifyNavigator {
                 try { Thread.sleep(POLL_INTERVAL_MS); } catch (InterruptedException ignored) {}
             }
 
-            Log.i(TAG, String.format("[%s] SCREEN_DETECTED screen=%s (UI tree loaded in %d ms)",
+            Log.i(TAG, String.format("[%s] SCREEN_DETECTED screen=%s (UI tree analyzed in %d ms)",
                     getIsoUtcTimestamp(), currentScreen.name(), System.currentTimeMillis() - startLoad));
 
             // 3. Pre-check: Already on target screen?
@@ -176,7 +184,7 @@ public class SpotifyNavigator {
                 return;
             }
 
-            // 4. If Target Node not found AND not on main bottom nav, attempt BACK recovery
+            // 4. Slow Recovery if UNKNOWN_SCREEN and no bottom navigation
             if (targetNode == null && currentScreen == SpotifyScreen.UNKNOWN_SCREEN && !hasBottomNavigation(root)) {
                 if (root != null) root.recycle();
                 currentScreen = recoverFromUnknownScreen(service);
@@ -219,10 +227,11 @@ public class SpotifyNavigator {
                 return;
             }
 
-            // Sleep 600ms for tab transition animation
-            try { Thread.sleep(600); } catch (InterruptedException ignored) {}
+            // Paced 2.5 Seconds Delay after clicking tab/node to allow screen transition
+            Log.i(TAG, String.format("[%s] Action CLICK executed. Waiting %d ms for screen transition...", getIsoUtcTimestamp(), POST_CLICK_DELAY_MS));
+            try { Thread.sleep(POST_CLICK_DELAY_MS); } catch (InterruptedException ignored) {}
 
-            // 6. UI Stabilization (Up to 3.5 seconds polling element presence)
+            // 6. UI Stabilization Check (Up to 6 seconds)
             long startWait = System.currentTimeMillis();
             SpotifyScreen finalScreen = SpotifyScreen.UNKNOWN_SCREEN;
             boolean stabilized = false;
@@ -235,7 +244,7 @@ public class SpotifyNavigator {
 
                     if (finalScreen == targetScreen || (targetScreen == SpotifyScreen.SEARCH && finalScreen == SpotifyScreen.SEARCH_RESULTS)) {
                         stabilized = true;
-                        long elapsedMs = System.currentTimeMillis() - startWait + 600;
+                        long elapsedMs = System.currentTimeMillis() - startWait + POST_CLICK_DELAY_MS;
                         Log.i(TAG, String.format("[%s] SCREEN_STABILIZED screen=%s elapsed_ms=%d",
                                 getIsoUtcTimestamp(), finalScreen.name(), elapsedMs));
                         break;
@@ -260,11 +269,13 @@ public class SpotifyNavigator {
 
     private static SpotifyScreen recoverFromUnknownScreen(SpotifyAccessibilityService service) {
         for (int attempt = 1; attempt <= MAX_UNKNOWN_RECOVERY_ATTEMPTS; attempt++) {
-            Log.w(TAG, String.format("[%s] UNKNOWN_SCREEN detected. Attempting recovery back navigation %d/%d",
-                    getIsoUtcTimestamp(), attempt, MAX_UNKNOWN_RECOVERY_ATTEMPTS));
+            Log.w(TAG, String.format("[%s] UNKNOWN_SCREEN detected. Attempting slow recovery back navigation %d/%d (waiting %d ms)",
+                    getIsoUtcTimestamp(), attempt, MAX_UNKNOWN_RECOVERY_ATTEMPTS, BACK_RECOVERY_DELAY_MS));
 
             service.performGlobalAction(AccessibilityService.GLOBAL_ACTION_BACK);
-            try { Thread.sleep(800); } catch (InterruptedException ignored) {}
+            
+            // Slow 2.0 seconds delay between BACK presses
+            try { Thread.sleep(BACK_RECOVERY_DELAY_MS); } catch (InterruptedException ignored) {}
 
             AccessibilityNodeInfo freshRoot = service.getRootInActiveWindow();
             SpotifyScreen detected = detectCurrentScreen(freshRoot);
