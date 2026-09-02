@@ -20,6 +20,7 @@ public class SpotifyNavigator {
     private static final String SPOTIFY_PACKAGE = SpotifyAccessibilityService.SPOTIFY_PACKAGE;
 
     private static final long STABILIZATION_TIMEOUT_MS = 3000;
+    private static final long UI_LOAD_WAIT_TIMEOUT_MS = 2500;
     private static final long POLL_INTERVAL_MS = 300;
     private static final int MAX_UNKNOWN_RECOVERY_ATTEMPTS = 3;
 
@@ -84,6 +85,11 @@ public class SpotifyNavigator {
             return SpotifyScreen.HOME;
         }
 
+        // Fallback: If bottom navigation tabs exist, treat as top-level screen
+        if (hasBottomNavigation(root)) {
+            return SpotifyScreen.HOME;
+        }
+
         return SpotifyScreen.UNKNOWN_SCREEN;
     }
 
@@ -135,24 +141,40 @@ public class SpotifyNavigator {
                 }
             }
 
-            // 2. Detect Current Screen
-            AccessibilityNodeInfo root = service.getRootInActiveWindow();
-            SpotifyScreen currentScreen = detectCurrentScreen(root);
-            Log.i(TAG, String.format("[%s] SCREEN_DETECTED screen=%s", getIsoUtcTimestamp(), currentScreen.name()));
+            // 2. Poll for UI tree stabilization after Spotify launch (up to 2.5 seconds)
+            long startLoad = System.currentTimeMillis();
+            AccessibilityNodeInfo root = null;
+            SpotifyScreen currentScreen = SpotifyScreen.UNKNOWN_SCREEN;
+            AccessibilityNodeInfo targetNode = null;
+
+            while (System.currentTimeMillis() - startLoad < UI_LOAD_WAIT_TIMEOUT_MS) {
+                if (root != null) root.recycle();
+                root = service.getRootInActiveWindow();
+                if (root != null) {
+                    currentScreen = detectCurrentScreen(root);
+                    targetNode = findTargetNavigationNode(root, targetScreen);
+
+                    if (currentScreen != SpotifyScreen.UNKNOWN_SCREEN || targetNode != null) {
+                        break;
+                    }
+                }
+                try { Thread.sleep(POLL_INTERVAL_MS); } catch (InterruptedException ignored) {}
+            }
+
+            Log.i(TAG, String.format("[%s] SCREEN_DETECTED screen=%s (UI tree loaded in %d ms)",
+                    getIsoUtcTimestamp(), currentScreen.name(), System.currentTimeMillis() - startLoad));
 
             // 3. Pre-check: Already on target screen?
             if (currentScreen == targetScreen || (targetScreen == SpotifyScreen.SEARCH && currentScreen == SpotifyScreen.SEARCH_RESULTS)) {
                 Log.i(TAG, String.format("[%s] NAVIGATION_SUCCESS already on target=%s", getIsoUtcTimestamp(), currentScreen.name()));
+                if (targetNode != null) targetNode.recycle();
                 if (root != null) root.recycle();
                 emitStepOk(context, runId, stepName);
                 if (callback != null) callback.onResult(true, currentScreen, null);
                 return;
             }
 
-            // 4. Try locating Target Navigation Node FIRST
-            AccessibilityNodeInfo targetNode = findTargetNavigationNode(root, targetScreen);
-
-            // 5. If Target Node not found and screen is UNKNOWN, attempt BACK recovery
+            // 4. If Target Node still not found and screen is UNKNOWN, attempt BACK recovery
             if (targetNode == null && currentScreen == SpotifyScreen.UNKNOWN_SCREEN) {
                 if (root != null) root.recycle();
                 currentScreen = recoverFromUnknownScreen(service);
@@ -179,7 +201,7 @@ public class SpotifyNavigator {
                 return;
             }
 
-            // 6. Click Navigation Node
+            // 5. Click Navigation Node
             AccessibilityNodeInfo clickable = findClickableAncestor(targetNode);
             boolean clicked = clickable.performAction(AccessibilityNodeInfo.ACTION_CLICK);
 
@@ -195,7 +217,7 @@ public class SpotifyNavigator {
                 return;
             }
 
-            // 7. UI Stabilization (Up to 3 seconds polling element presence)
+            // 6. UI Stabilization (Up to 3 seconds polling element presence)
             long startWait = System.currentTimeMillis();
             SpotifyScreen finalScreen = SpotifyScreen.UNKNOWN_SCREEN;
             boolean stabilized = false;
@@ -254,6 +276,21 @@ public class SpotifyNavigator {
     }
 
     // --- SCREEN DETECTORS ---
+
+    private static boolean hasBottomNavigation(AccessibilityNodeInfo root) {
+        if (root == null) return false;
+        AccessibilityNodeInfo searchTab = findSearchTabNode(root);
+        if (searchTab != null) {
+            searchTab.recycle();
+            return true;
+        }
+        AccessibilityNodeInfo homeTab = findHomeTabNode(root);
+        if (homeTab != null) {
+            homeTab.recycle();
+            return true;
+        }
+        return false;
+    }
 
     private static boolean isNowPlayingScreen(AccessibilityNodeInfo root) {
         String[] viewIds = {
