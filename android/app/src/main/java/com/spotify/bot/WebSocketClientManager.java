@@ -9,8 +9,14 @@ import org.json.JSONArray;
 import org.json.JSONException;
 import org.json.JSONObject;
 
+import java.text.SimpleDateFormat;
+import java.util.Date;
 import java.util.List;
+import java.util.Locale;
+import java.util.TimeZone;
+import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 import okhttp3.OkHttpClient;
 import okhttp3.Request;
@@ -49,7 +55,8 @@ public class WebSocketClientManager {
     private boolean isUserDisconnect = false;
     private boolean allowReconnect = true;
     private int reconnectAttempts = 0;
-    private static final long INITIAL_RECONNECT_DELAY_MS = 2000;
+    private final AtomicBoolean isReconnectScheduled = new AtomicBoolean(false);
+    private final ConcurrentLinkedQueue<JSONObject> pendingEventsQueue = new ConcurrentLinkedQueue<>();
 
     private WebSocketClientManager(Context context) {
         this.context = context.getApplicationContext();
@@ -85,9 +92,16 @@ public class WebSocketClientManager {
         return currentState == ConnectionState.READY;
     }
 
+    private String getIsoUtcTimestamp() {
+        SimpleDateFormat sdf = new SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'", Locale.US);
+        sdf.setTimeZone(TimeZone.getTimeZone("UTC"));
+        return sdf.format(new Date());
+    }
+
     private void updateState(ConnectionState state, String info) {
         this.currentState = state;
-        Log.i(TAG, String.format("State transition -> [%s]: %s", state.name(), info != null ? info : ""));
+        Log.i(TAG, String.format("[%s] State transition -> [%s]: %s",
+                getIsoUtcTimestamp(), state.name(), info != null ? info : ""));
 
         if (listener != null) {
             mainHandler.post(() -> listener.onStateChanged(state, info));
@@ -95,6 +109,8 @@ public class WebSocketClientManager {
     }
 
     public synchronized void connect() {
+        isReconnectScheduled.set(false); // Reset schedule lock when connect starts
+
         if (currentState == ConnectionState.CONNECTING || currentState == ConnectionState.READY) {
             Log.d(TAG, "Connect ignored: connection already active or connecting.");
             return;
@@ -106,7 +122,8 @@ public class WebSocketClientManager {
         String serverUrl = DeviceConfig.getServerUrl(context);
         String deviceId = DeviceConfig.getDeviceId(context);
 
-        Log.i(TAG, String.format("WEBSOCKET_CONNECTING to '%s' for device '%s'", serverUrl, deviceId));
+        Log.i(TAG, String.format("WEBSOCKET_RECONNECT_ATTEMPT device_id=%s attempt=%d timestamp=%s url=%s",
+                deviceId, reconnectAttempts + 1, getIsoUtcTimestamp(), serverUrl));
         updateState(ConnectionState.CONNECTING, "Connecting to " + serverUrl);
 
         Request request = new Request.Builder()
@@ -119,10 +136,14 @@ public class WebSocketClientManager {
     public synchronized void disconnect() {
         isUserDisconnect = true;
         allowReconnect = false;
+        isReconnectScheduled.set(false);
         reconnectAttempts = 0;
+        pendingEventsQueue.clear();
 
         if (webSocket != null) {
-            Log.i(TAG, "WEBSOCKET_DISCONNECTED by user request.");
+            String deviceId = DeviceConfig.getDeviceId(context);
+            Log.i(TAG, String.format("WEBSOCKET_DISCONNECTED device_id=%s reason=user_requested timestamp=%s",
+                    deviceId, getIsoUtcTimestamp()));
             webSocket.close(1000, "User disconnected");
             webSocket = null;
         }
@@ -150,7 +171,8 @@ public class WebSocketClientManager {
             }
             helloJson.put("capabilities", capsArray);
 
-            Log.i(TAG, String.format("DEVICE_HELLO_SENT for device_id='%s', version='%s'", deviceId, appVersion));
+            Log.i(TAG, String.format("DEVICE_HELLO_SENT device_id=%s version=%s timestamp=%s",
+                    deviceId, appVersion, getIsoUtcTimestamp()));
             updateState(ConnectionState.AUTHENTICATING, "Authenticating device identity...");
             webSocket.send(helloJson.toString());
 
@@ -160,11 +182,31 @@ public class WebSocketClientManager {
     }
 
     public void sendEventPayload(JSONObject eventPayload) {
-        if (webSocket == null || currentState != ConnectionState.READY) {
-            Log.w(TAG, "Cannot send event: WebSocket is not in READY state.");
-            return;
+        if (eventPayload == null) return;
+
+        if (currentState == ConnectionState.READY && webSocket != null) {
+            webSocket.send(eventPayload.toString());
+        } else {
+            Log.i(TAG, "Buffering event while socket unauthenticated: " + eventPayload.optString("type"));
+            pendingEventsQueue.offer(eventPayload);
         }
-        webSocket.send(eventPayload.toString());
+    }
+
+    private void flushPendingEvents() {
+        if (webSocket == null || currentState != ConnectionState.READY) return;
+
+        int flushedCount = 0;
+        while (!pendingEventsQueue.isEmpty()) {
+            JSONObject event = pendingEventsQueue.poll();
+            if (event != null) {
+                webSocket.send(event.toString());
+                flushedCount++;
+            }
+        }
+        if (flushedCount > 0) {
+            Log.i(TAG, String.format("Flushed %d pending buffered events after reconnection timestamp=%s",
+                    flushedCount, getIsoUtcTimestamp()));
+        }
     }
 
     private void scheduleReconnect() {
@@ -173,11 +215,35 @@ public class WebSocketClientManager {
             return;
         }
 
-        reconnectAttempts++;
-        long delayMs = (long) (INITIAL_RECONNECT_DELAY_MS * Math.pow(2, Math.min(reconnectAttempts - 1, 4)));
-        delayMs = Math.min(delayMs, 10000); // Cap reconnect delay at 10 seconds for fast persistent reconnection
+        // IDEMPOTENT SINGLE RECONNECT SCHEDULER LOCK
+        if (!isReconnectScheduled.compareAndSet(false, true)) {
+            Log.d(TAG, "Reconnect already scheduled. Skipping duplicate reconnect trigger.");
+            return;
+        }
 
-        Log.i(TAG, String.format("Scheduling continuous auto-reconnect attempt %d in %d ms", reconnectAttempts, delayMs));
+        reconnectAttempts++;
+
+        // EXACT EXPONENTIAL BACKOFF: 1s -> 2s -> 4s -> 8s -> 16s -> 30s max cap
+        long delaySeconds;
+        if (reconnectAttempts == 1) {
+            delaySeconds = 1;
+        } else if (reconnectAttempts == 2) {
+            delaySeconds = 2;
+        } else if (reconnectAttempts == 3) {
+            delaySeconds = 4;
+        } else if (reconnectAttempts == 4) {
+            delaySeconds = 8;
+        } else if (reconnectAttempts == 5) {
+            delaySeconds = 16;
+        } else {
+            delaySeconds = 30; // Cap at 30 seconds max
+        }
+        long delayMs = delaySeconds * 1000L;
+
+        String deviceId = DeviceConfig.getDeviceId(context);
+        Log.i(TAG, String.format("WEBSOCKET_RECONNECT_SCHEDULED device_id=%s attempt=%d delay_ms=%d timestamp=%s",
+                deviceId, reconnectAttempts, delayMs, getIsoUtcTimestamp()));
+
         mainHandler.postDelayed(this::connect, delayMs);
     }
 
@@ -185,11 +251,9 @@ public class WebSocketClientManager {
 
         @Override
         public void onOpen(WebSocket ws, Response response) {
-            Log.i(TAG, "WEBSOCKET_CONNECTED successfully.");
-            mainHandler.post(() -> {
-                reconnectAttempts = 0; // Reset reconnect counter on successful TCP open
-                sendDeviceHello();
-            });
+            String deviceId = DeviceConfig.getDeviceId(context);
+            Log.i(TAG, String.format("WEBSOCKET_CONNECTED device_id=%s timestamp=%s", deviceId, getIsoUtcTimestamp()));
+            mainHandler.post(WebSocketClientManager.this::sendDeviceHello);
         }
 
         @Override
@@ -201,12 +265,21 @@ public class WebSocketClientManager {
                 String msgType = json.optString("type", "");
 
                 if ("HELLO_ACK".equals(msgType)) {
-                    Log.i(TAG, "HELLO_ACK_RECEIVED: Device authenticated and ready for commands.");
+                    String deviceId = DeviceConfig.getDeviceId(context);
+                    Log.i(TAG, String.format("HELLO_ACK_RECEIVED device_id=%s attempt_reset=%d timestamp=%s",
+                            deviceId, reconnectAttempts, getIsoUtcTimestamp()));
+
+                    reconnectAttempts = 0; // RESET ATTEMPT COUNTER ONLY UPON HELLO_ACK
                     updateState(ConnectionState.READY, "Authenticated & Ready");
+                    flushPendingEvents();
+                    CommandQueueManager.getInstance(context).notifySocketReconnected();
 
                 } else if ("HELLO_REJECT".equals(msgType)) {
                     String reason = json.optString("reason", "UNAUTHORIZED");
-                    Log.e(TAG, String.format("HELLO_REJECT_RECEIVED: Authentication rejected. Reason: %s", reason));
+                    String deviceId = DeviceConfig.getDeviceId(context);
+                    Log.e(TAG, String.format("HELLO_REJECT_RECEIVED device_id=%s reason=%s timestamp=%s",
+                            deviceId, reason, getIsoUtcTimestamp()));
+
                     allowReconnect = false; // STOP infinite retries on credential rejection
                     updateState(ConnectionState.REJECTED, "Rejected: " + reason);
                     ws.close(1008, "Authentication Rejected");
@@ -231,12 +304,17 @@ public class WebSocketClientManager {
 
         @Override
         public void onClosing(WebSocket ws, int code, String reason) {
-            Log.i(TAG, String.format("WEBSOCKET_DISCONNECTED onClosing code=%d, reason=%s", code, reason));
+            String deviceId = DeviceConfig.getDeviceId(context);
+            Log.i(TAG, String.format("WEBSOCKET_DISCONNECTED onClosing device_id=%s code=%d reason=%s timestamp=%s",
+                    deviceId, code, reason, getIsoUtcTimestamp()));
         }
 
         @Override
         public void onClosed(WebSocket ws, int code, String reason) {
-            Log.i(TAG, String.format("WEBSOCKET_DISCONNECTED onClosed code=%d, reason=%s", code, reason));
+            String deviceId = DeviceConfig.getDeviceId(context);
+            Log.i(TAG, String.format("WEBSOCKET_DISCONNECTED onClosed device_id=%s code=%d reason=%s timestamp=%s",
+                    deviceId, code, reason, getIsoUtcTimestamp()));
+
             mainHandler.post(() -> {
                 if (currentState != ConnectionState.REJECTED && !isUserDisconnect) {
                     updateState(ConnectionState.DISCONNECTED, "Connection closed");
@@ -247,7 +325,10 @@ public class WebSocketClientManager {
 
         @Override
         public void onFailure(WebSocket ws, Throwable t, Response response) {
-            Log.e(TAG, "WEBSOCKET_ERROR Failure: " + t.getMessage(), t);
+            String deviceId = DeviceConfig.getDeviceId(context);
+            Log.e(TAG, String.format("WEBSOCKET_ERROR Failure device_id=%s error=%s timestamp=%s",
+                    deviceId, t.getMessage(), getIsoUtcTimestamp()), t);
+
             mainHandler.post(() -> {
                 if (currentState != ConnectionState.REJECTED && !isUserDisconnect) {
                     updateState(ConnectionState.DISCONNECTED, "Connection error: " + t.getMessage());

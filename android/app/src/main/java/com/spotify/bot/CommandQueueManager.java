@@ -10,9 +10,7 @@ import org.json.JSONObject;
 
 import java.text.ParseException;
 import java.text.SimpleDateFormat;
-import java.util.Collections;
 import java.util.Date;
-import java.util.HashSet;
 import java.util.Locale;
 import java.util.Set;
 import java.util.TimeZone;
@@ -24,6 +22,7 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicReference;
 
 public class CommandQueueManager {
 
@@ -37,6 +36,7 @@ public class CommandQueueManager {
     private final Set<String> seenCommandIds;
     private final ExecutorService queueExecutor;
     private final AtomicBoolean isProcessing;
+    private final AtomicReference<JSONObject> activeInFlightCommand;
 
     private CommandQueueManager(Context context) {
         this.context = context.getApplicationContext();
@@ -45,6 +45,7 @@ public class CommandQueueManager {
         this.seenCommandIds = ConcurrentHashMap.newKeySet();
         this.queueExecutor = Executors.newSingleThreadExecutor(); // Strictly 1 command at a time
         this.isProcessing = new AtomicBoolean(false);
+        this.activeInFlightCommand = new AtomicReference<>(null);
     }
 
     public static synchronized CommandQueueManager getInstance(Context context) {
@@ -52,6 +53,12 @@ public class CommandQueueManager {
             instance = new CommandQueueManager(context);
         }
         return instance;
+    }
+
+    private String getIsoUtcTimestamp() {
+        SimpleDateFormat sdf = new SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'", Locale.US);
+        sdf.setTimeZone(TimeZone.getTimeZone("UTC"));
+        return sdf.format(new Date());
     }
 
     /**
@@ -67,19 +74,21 @@ public class CommandQueueManager {
 
         // 1. ATOMIC DUPLICATE CHECK
         if (!seenCommandIds.add(commandId)) {
-            Log.w(TAG, "COMMAND_DUPLICATE: Command ID '" + commandId + "' already processed/enqueued. Skipping duplicate.");
+            Log.w(TAG, String.format("[%s] COMMAND_DUPLICATE: Command ID '%s' already processed/enqueued. Skipping duplicate.",
+                    getIsoUtcTimestamp(), commandId));
             return;
         }
 
         // 2. CHECK READY CONNECTION STATE
         if (!WebSocketClientManager.getInstance(context).isReady()) {
-            Log.w(TAG, "COMMAND_REJECTED_UNAUTHENTICATED: Device is not in READY state when command arrived.");
+            Log.w(TAG, String.format("[%s] COMMAND_REJECTED_UNAUTHENTICATED: Device not in READY state when command arrived.",
+                    getIsoUtcTimestamp()));
             seenCommandIds.remove(commandId);
             return;
         }
 
-        Log.i(TAG, String.format("COMMAND_QUEUED: Enqueued command_id='%s', task_name='%s' (Queue length: %d)",
-                commandId, commandPayload.optString("task_name", "Task"), commandQueue.size() + 1));
+        Log.i(TAG, String.format("[%s] COMMAND_QUEUED: Enqueued command_id='%s', task_name='%s' (Queue length: %d)",
+                getIsoUtcTimestamp(), commandId, commandPayload.optString("task_name", "Task"), commandQueue.size() + 1));
 
         commandQueue.offer(commandPayload);
         triggerQueueProcessing();
@@ -100,17 +109,21 @@ public class CommandQueueManager {
             String runId = command.optString("run_id", "");
             String actionType = command.optString("action_type", "CLICK");
 
-            Log.i(TAG, String.format("COMMAND_STARTED: Processing command_id='%s', run_id='%s', action='%s'",
-                    commandId, runId, actionType));
+            activeInFlightCommand.set(command);
+
+            Log.i(TAG, String.format("[%s] COMMAND_STARTED: Processing command_id='%s', run_id='%s', action='%s'",
+                    getIsoUtcTimestamp(), commandId, runId, actionType));
 
             CountDownLatch latch = new CountDownLatch(1);
 
             try {
                 // 3. PRE-EXECUTION TTL CHECK
                 if (isCommandExpired(command)) {
-                    Log.w(TAG, "COMMAND_EXPIRED: TTL expired prior to execution for command_id=" + commandId);
+                    Log.w(TAG, String.format("[%s] COMMAND_EXPIRED: TTL expired prior to execution for command_id=%s",
+                            getIsoUtcTimestamp(), commandId));
                     emitStepFailed(runId, 1, "COMMAND_EXPIRED");
                     emitCommandDone(runId, "FAILED", false);
+                    activeInFlightCommand.set(null);
                     continue;
                 }
 
@@ -119,12 +132,29 @@ public class CommandQueueManager {
                 latch.await(30, TimeUnit.SECONDS); // Wait for async UI callbacks
 
             } catch (Throwable t) {
-                Log.e(TAG, "UNHANDLED_EXCEPTION during command execution for run_id=" + runId, t);
+                Log.e(TAG, String.format("[%s] UNHANDLED_EXCEPTION during command execution for run_id=%s",
+                        getIsoUtcTimestamp(), runId), t);
                 emitStepFailed(runId, 1, "UNHANDLED_EXCEPTION");
                 emitCommandDone(runId, "FAILED", false);
+            } finally {
+                activeInFlightCommand.set(null);
             }
         }
         isProcessing.set(false);
+    }
+
+    public JSONObject getActiveInFlightCommand() {
+        return activeInFlightCommand.get();
+    }
+
+    public void notifySocketReconnected() {
+        JSONObject inFlight = activeInFlightCommand.get();
+        if (inFlight != null) {
+            String commandId = inFlight.optString("command_id", "");
+            String runId = inFlight.optString("run_id", "");
+            Log.i(TAG, String.format("IN_FLIGHT_COMMAND_PRESERVED command_id=%s run_id=%s timestamp=%s",
+                    commandId, runId, getIsoUtcTimestamp()));
+        }
     }
 
     private boolean isCommandExpired(JSONObject command) {
@@ -220,7 +250,7 @@ public class CommandQueueManager {
             payload.put("step_name", stepName);
             event.put("payload", payload);
 
-            Log.i(TAG, String.format("STEP_STARTED [Step %d]: %s", stepIndex, stepName));
+            Log.i(TAG, String.format("[%s] STEP_STARTED [Step %d]: %s", getIsoUtcTimestamp(), stepIndex, stepName));
             WebSocketClientManager.getInstance(context).sendEventPayload(event);
         } catch (JSONException e) {
             Log.e(TAG, "Error emitting STEP_STARTED", e);
@@ -238,7 +268,7 @@ public class CommandQueueManager {
             payload.put("step_name", stepName);
             event.put("payload", payload);
 
-            Log.i(TAG, String.format("STEP_OK [Step %d]: %s", stepIndex, stepName));
+            Log.i(TAG, String.format("[%s] STEP_OK [Step %d]: %s", getIsoUtcTimestamp(), stepIndex, stepName));
             WebSocketClientManager.getInstance(context).sendEventPayload(event);
         } catch (JSONException e) {
             Log.e(TAG, "Error emitting STEP_OK", e);
@@ -256,7 +286,7 @@ public class CommandQueueManager {
             payload.put("reason_code", reasonCode);
             event.put("payload", payload);
 
-            Log.e(TAG, String.format("STEP_FAILED [Step %d]: reason_code=%s", stepIndex, reasonCode));
+            Log.e(TAG, String.format("[%s] STEP_FAILED [Step %d]: reason_code=%s", getIsoUtcTimestamp(), stepIndex, reasonCode));
             WebSocketClientManager.getInstance(context).sendEventPayload(event);
         } catch (JSONException e) {
             Log.e(TAG, "Error emitting STEP_FAILED", e);
@@ -274,7 +304,7 @@ public class CommandQueueManager {
             payload.put("result", result);
             event.put("payload", payload);
 
-            Log.i(TAG, String.format("COMMAND_DONE: status=%s, result=%b", status, result));
+            Log.i(TAG, String.format("[%s] COMMAND_DONE: status=%s, result=%b", getIsoUtcTimestamp(), status, result));
             WebSocketClientManager.getInstance(context).sendEventPayload(event);
         } catch (JSONException e) {
             Log.e(TAG, "Error emitting COMMAND_DONE", e);
