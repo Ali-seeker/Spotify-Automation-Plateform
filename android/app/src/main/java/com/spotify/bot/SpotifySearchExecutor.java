@@ -20,8 +20,9 @@ public class SpotifySearchExecutor {
     private static final String TAG = "SpotifyBotSearch";
 
     private static final long POLL_INTERVAL_MS = 400;
-    private static final long RESULTS_TIMEOUT_MS = 3000;
+    private static final long RESULTS_TIMEOUT_MS = 4000;
     private static final long POST_INPUT_DELAY_MS = 1500;
+    private static final long NAV_TIMEOUT_MS = 25000; // 25s timeout for human-paced navigation
 
     public interface SearchCallback {
         void onResult(boolean success, String matchedTitle, String reasonCode);
@@ -63,8 +64,7 @@ public class SpotifySearchExecutor {
                 return;
             }
 
-            // SUB-STEP 1: Navigate to Search Tab
-            emitStepStarted(context, runId, 1, "NAVIGATE_TO_SEARCH");
+            // SUB-STEP 1: Navigate to Search Tab using SpotifyNavigator (SpotifyNavigator emits step events)
             final boolean[] navResult = {false};
             final String[] navReason = {null};
             final SpotifyScreen[] finalNavScreen = {SpotifyScreen.UNKNOWN_SCREEN};
@@ -79,17 +79,15 @@ public class SpotifySearchExecutor {
                         navLock.notifyAll();
                     }
                 });
-                try { navLock.wait(12000); } catch (InterruptedException ignored) {}
+                try { navLock.wait(NAV_TIMEOUT_MS); } catch (InterruptedException ignored) {}
             }
 
             if (!navResult[0]) {
                 String rCode = navReason[0] != null ? navReason[0] : "NAVIGATION_FAILED";
                 Log.e(TAG, "Search navigation failed: " + rCode);
-                emitStepFailed(context, runId, 1, rCode);
                 if (callback != null) callback.onResult(false, null, rCode);
                 return;
             }
-            emitStepOk(context, runId, 1, "NAVIGATE_TO_SEARCH");
 
             // SUB-STEP 2: Locate Search Input Field
             emitStepStarted(context, runId, 2, "LOCATE_SEARCH_FIELD");
@@ -115,7 +113,7 @@ public class SpotifySearchExecutor {
             clearArgs.putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, "");
             searchInputNode.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, clearArgs);
 
-            try { Thread.sleep(300); } catch (InterruptedException ignored) {}
+            try { Thread.sleep(400); } catch (InterruptedException ignored) {}
 
             Bundle setTextArgs = new Bundle();
             setTextArgs.putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, searchQuery);
@@ -150,20 +148,18 @@ public class SpotifySearchExecutor {
 
             // SUB-STEP 4: Submit Search
             emitStepStarted(context, runId, 4, "SUBMIT_SEARCH");
-            // Perform click or IME submit trigger
             freshRoot = service.getRootInActiveWindow();
             AccessibilityNodeInfo submitNode = locateSearchInputField(freshRoot);
-            boolean submitTriggered = false;
             if (submitNode != null) {
-                submitTriggered = submitNode.performAction(AccessibilityNodeInfo.ACTION_CLICK);
+                submitNode.performAction(AccessibilityNodeInfo.ACTION_CLICK);
                 submitNode.recycle();
             }
             if (freshRoot != null) freshRoot.recycle();
 
-            try { Thread.sleep(1000); } catch (InterruptedException ignored) {}
+            try { Thread.sleep(1200); } catch (InterruptedException ignored) {}
             emitStepOk(context, runId, 4, "SUBMIT_SEARCH");
 
-            // SUB-STEP 5: Wait for Search Results (Condition-based polling up to 3 seconds)
+            // SUB-STEP 5: Wait for Search Results (Condition-based polling up to 4 seconds)
             emitStepStarted(context, runId, 5, "WAIT_FOR_RESULTS");
             long startWait = System.currentTimeMillis();
             boolean resultsDetected = false;
@@ -183,7 +179,7 @@ public class SpotifySearchExecutor {
             }
 
             if (!resultsDetected || resultItems == null || resultItems.isEmpty()) {
-                Log.e(TAG, "No search results detected within 3000ms.");
+                Log.e(TAG, "No search results detected within timeout.");
                 emitStepFailed(context, runId, 5, "NO_RESULTS_FOUND");
                 if (callback != null) callback.onResult(false, null, "NO_RESULTS_FOUND");
                 return;
