@@ -19,7 +19,7 @@ public class SpotifyNavigator {
     private static final String TAG = "SpotifyBotNav";
     private static final String SPOTIFY_PACKAGE = SpotifyAccessibilityService.SPOTIFY_PACKAGE;
 
-    private static final long STABILIZATION_TIMEOUT_MS = 3000;
+    private static final long STABILIZATION_TIMEOUT_MS = 3500;
     private static final long UI_LOAD_WAIT_TIMEOUT_MS = 3000;
     private static final long POLL_INTERVAL_MS = 300;
     private static final int MAX_UNKNOWN_RECOVERY_ATTEMPTS = 3;
@@ -132,13 +132,15 @@ public class SpotifyNavigator {
                 Log.w(TAG, "Spotify not in foreground. Attempting launch...");
                 final boolean[] launched = {false};
                 SpotifyLauncher.launchSpotify(context, (success, msg) -> launched[0] = success);
-                try { Thread.sleep(1500); } catch (InterruptedException ignored) {}
+                try { Thread.sleep(1800); } catch (InterruptedException ignored) {}
 
                 if (!SpotifyAccessibilityService.isSpotifyForeground()) {
                     emitStepFailed(context, runId, "SPOTIFY_NOT_FOREGROUND");
                     if (callback != null) callback.onResult(false, SpotifyScreen.UNKNOWN_SCREEN, "SPOTIFY_NOT_FOREGROUND");
                     return;
                 }
+            } else {
+                try { Thread.sleep(500); } catch (InterruptedException ignored) {}
             }
 
             // 2. Poll for UI tree stabilization after Spotify launch (up to 3.0 seconds)
@@ -217,14 +219,15 @@ public class SpotifyNavigator {
                 return;
             }
 
-            // 6. UI Stabilization (Up to 3 seconds polling element presence)
+            // Sleep 600ms for tab transition animation
+            try { Thread.sleep(600); } catch (InterruptedException ignored) {}
+
+            // 6. UI Stabilization (Up to 3.5 seconds polling element presence)
             long startWait = System.currentTimeMillis();
             SpotifyScreen finalScreen = SpotifyScreen.UNKNOWN_SCREEN;
             boolean stabilized = false;
 
             while (System.currentTimeMillis() - startWait < STABILIZATION_TIMEOUT_MS) {
-                try { Thread.sleep(POLL_INTERVAL_MS); } catch (InterruptedException ignored) {}
-
                 AccessibilityNodeInfo freshRoot = service.getRootInActiveWindow();
                 if (freshRoot != null) {
                     finalScreen = detectCurrentScreen(freshRoot);
@@ -232,12 +235,13 @@ public class SpotifyNavigator {
 
                     if (finalScreen == targetScreen || (targetScreen == SpotifyScreen.SEARCH && finalScreen == SpotifyScreen.SEARCH_RESULTS)) {
                         stabilized = true;
-                        long elapsedMs = System.currentTimeMillis() - startWait;
+                        long elapsedMs = System.currentTimeMillis() - startWait + 600;
                         Log.i(TAG, String.format("[%s] SCREEN_STABILIZED screen=%s elapsed_ms=%d",
                                 getIsoUtcTimestamp(), finalScreen.name(), elapsedMs));
                         break;
                     }
                 }
+                try { Thread.sleep(POLL_INTERVAL_MS); } catch (InterruptedException ignored) {}
             }
 
             if (stabilized) {
@@ -342,12 +346,15 @@ public class SpotifyNavigator {
     }
 
     private static boolean isSearchScreen(AccessibilityNodeInfo root) {
+        if (root == null) return false;
+
         String[] viewIds = {
                 "com.spotify.music:id/find_search_field",
                 "com.spotify.music:id/query",
                 "com.spotify.music:id/search_edit_text",
                 "com.spotify.music:id/search_text_input",
-                "com.spotify.music:id/search_uri"
+                "com.spotify.music:id/search_uri",
+                "com.spotify.music:id/search_field"
         };
         for (String id : viewIds) {
             List<AccessibilityNodeInfo> nodes = root.findAccessibilityNodeInfosByViewId(id);
@@ -360,7 +367,9 @@ public class SpotifyNavigator {
         String[] searchTexts = {
                 "What do you want to listen to?",
                 "Browse all",
-                "Explore"
+                "Explore",
+                "Podcasts",
+                "Audiobooks"
         };
         for (String t : searchTexts) {
             List<AccessibilityNodeInfo> textNodes = root.findAccessibilityNodeInfosByText(t);
@@ -382,6 +391,8 @@ public class SpotifyNavigator {
     }
 
     private static boolean isHomeScreen(AccessibilityNodeInfo root) {
+        if (root == null) return false;
+
         String[] viewIds = {
                 "com.spotify.music:id/home_tab",
                 "com.spotify.music:id/bottom_navigation_home"
@@ -418,6 +429,8 @@ public class SpotifyNavigator {
     }
 
     private static boolean isLibraryScreen(AccessibilityNodeInfo root) {
+        if (root == null) return false;
+
         String[] viewIds = {
                 "com.spotify.music:id/library_tab",
                 "com.spotify.music:id/bottom_navigation_library"
