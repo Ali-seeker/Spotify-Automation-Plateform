@@ -84,11 +84,6 @@ public class SpotifyNavigator {
             return SpotifyScreen.HOME;
         }
 
-        // Fallback: If Spotify is foreground and bottom nav tabs exist, treat as HOME/Main screen
-        if (hasBottomNavigation(root)) {
-            return SpotifyScreen.HOME;
-        }
-
         return SpotifyScreen.UNKNOWN_SCREEN;
     }
 
@@ -154,7 +149,7 @@ public class SpotifyNavigator {
                 return;
             }
 
-            // 4. Try locating Target Navigation Node FIRST before attempting BACK recovery
+            // 4. Try locating Target Navigation Node FIRST
             AccessibilityNodeInfo targetNode = findTargetNavigationNode(root, targetScreen);
 
             // 5. If Target Node not found and screen is UNKNOWN, attempt BACK recovery
@@ -260,21 +255,6 @@ public class SpotifyNavigator {
 
     // --- SCREEN DETECTORS ---
 
-    private static boolean hasBottomNavigation(AccessibilityNodeInfo root) {
-        if (root == null) return false;
-        AccessibilityNodeInfo searchTab = findSearchTabNode(root);
-        if (searchTab != null) {
-            searchTab.recycle();
-            return true;
-        }
-        AccessibilityNodeInfo homeTab = findHomeTabNode(root);
-        if (homeTab != null) {
-            homeTab.recycle();
-            return true;
-        }
-        return false;
-    }
-
     private static boolean isNowPlayingScreen(AccessibilityNodeInfo root) {
         String[] viewIds = {
                 "com.spotify.music:id/player_controls",
@@ -328,8 +308,9 @@ public class SpotifyNavigator {
         String[] viewIds = {
                 "com.spotify.music:id/find_search_field",
                 "com.spotify.music:id/query",
-                "com.spotify.music:id/search_tab",
-                "com.spotify.music:id/bottom_navigation_search"
+                "com.spotify.music:id/search_edit_text",
+                "com.spotify.music:id/search_text_input",
+                "com.spotify.music:id/search_uri"
         };
         for (String id : viewIds) {
             List<AccessibilityNodeInfo> nodes = root.findAccessibilityNodeInfosByViewId(id);
@@ -339,11 +320,28 @@ public class SpotifyNavigator {
             }
         }
 
-        List<AccessibilityNodeInfo> textNodes = root.findAccessibilityNodeInfosByText("What do you want to listen to?");
-        if (textNodes != null && !textNodes.isEmpty()) {
-            for (AccessibilityNodeInfo n : textNodes) n.recycle();
-            return true;
+        String[] searchTexts = {
+                "What do you want to listen to?",
+                "Search",
+                "Browse all",
+                "Explore"
+        };
+        for (String t : searchTexts) {
+            List<AccessibilityNodeInfo> textNodes = root.findAccessibilityNodeInfosByText(t);
+            if (textNodes != null && !textNodes.isEmpty()) {
+                for (AccessibilityNodeInfo n : textNodes) n.recycle();
+                return true;
+            }
         }
+
+        // Check if search tab node itself is selected
+        AccessibilityNodeInfo searchTab = findSearchTabNode(root);
+        if (searchTab != null) {
+            boolean isSelected = searchTab.isSelected();
+            searchTab.recycle();
+            if (isSelected) return true;
+        }
+
         return false;
     }
 
@@ -355,12 +353,17 @@ public class SpotifyNavigator {
         for (String id : viewIds) {
             List<AccessibilityNodeInfo> nodes = root.findAccessibilityNodeInfosByViewId(id);
             if (nodes != null && !nodes.isEmpty()) {
-                for (AccessibilityNodeInfo n : nodes) n.recycle();
-                return true;
+                for (AccessibilityNodeInfo n : nodes) {
+                    if (n.isSelected()) {
+                        n.recycle();
+                        return true;
+                    }
+                    n.recycle();
+                }
             }
         }
 
-        String[] texts = {"Good morning", "Good afternoon", "Good evening", "Recently played", "Made for you", "Music", "Podcasts"};
+        String[] texts = {"Good morning", "Good afternoon", "Good evening", "Recently played", "Made for you"};
         for (String t : texts) {
             List<AccessibilityNodeInfo> nodes = root.findAccessibilityNodeInfosByText(t);
             if (nodes != null && !nodes.isEmpty()) {
@@ -379,8 +382,13 @@ public class SpotifyNavigator {
         for (String id : viewIds) {
             List<AccessibilityNodeInfo> nodes = root.findAccessibilityNodeInfosByViewId(id);
             if (nodes != null && !nodes.isEmpty()) {
-                for (AccessibilityNodeInfo n : nodes) n.recycle();
-                return true;
+                for (AccessibilityNodeInfo n : nodes) {
+                    if (n.isSelected()) {
+                        n.recycle();
+                        return true;
+                    }
+                    n.recycle();
+                }
             }
         }
 
