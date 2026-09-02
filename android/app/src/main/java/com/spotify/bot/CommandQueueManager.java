@@ -204,42 +204,54 @@ public class CommandQueueManager {
         String runId = command.optString("run_id", "");
         String actionType = command.optString("action_type", "CLICK");
 
-        // Step 1: Initiating Spotify Launch & Navigation
-        emitStepStarted(runId, 1, "Initiating Spotify Launch & Navigation");
+        if (actionType.equalsIgnoreCase("spotify.search")
+                || actionType.equalsIgnoreCase("SEARCH")
+                || actionType.equalsIgnoreCase("SEARCH_AND_PLAY")
+                || actionType.equalsIgnoreCase("CLICK_SEARCH")) {
 
-        SpotifyLauncher.launchSpotify(context, (launchSuccess, launchMsg) -> {
-            if (!launchSuccess) {
-                emitStepFailed(runId, 1, "SPOTIFY_LAUNCH_FAILED");
-                emitCommandDone(runId, "FAILED", false);
+            SpotifySearchExecutor.executeSearch(context, command, (success, matchedTitle, reasonCode) -> {
+                if (success) {
+                    emitCommandDone(runId, "SUCCESS", true);
+                } else {
+                    emitCommandDone(runId, "FAILED", false);
+                }
                 latch.countDown();
-                return;
-            }
-
-            emitStepOk(runId, 1, "Spotify Launched & Foreground Verified");
-
-            // Step 2: SpotifyNavigator Screen Awareness & Navigation to Search
-            SpotifyNavigator.goToSearch(context, runId, (navSuccess, finalScreen, navReason) -> {
-                if (!navSuccess) {
+            });
+        } else {
+            // Default fallback action
+            emitStepStarted(runId, 1, "Initiating Spotify Launch & Navigation");
+            SpotifyLauncher.launchSpotify(context, (launchSuccess, launchMsg) -> {
+                if (!launchSuccess) {
+                    emitStepFailed(runId, 1, "SPOTIFY_LAUNCH_FAILED");
                     emitCommandDone(runId, "FAILED", false);
                     latch.countDown();
                     return;
                 }
 
-                // Step 3: Executing Action
-                emitStepStarted(runId, 2, "Executing " + actionType + " UI action");
+                emitStepOk(runId, 1, "Spotify Launched & Foreground Verified");
 
-                SpotifyClicker.clickSearchWithRetry((clickSuccess, clickMsg, reasonCode) -> {
-                    if (clickSuccess) {
-                        emitStepOk(runId, 2, clickMsg);
-                        emitCommandDone(runId, "SUCCESS", true);
-                    } else {
-                        emitStepFailed(runId, 2, reasonCode != null ? reasonCode : "UI_ELEMENT_NOT_FOUND");
+                SpotifyNavigator.goToSearch(context, runId, (navSuccess, finalScreen, navReason) -> {
+                    if (!navSuccess) {
                         emitCommandDone(runId, "FAILED", false);
+                        latch.countDown();
+                        return;
                     }
-                    latch.countDown();
+
+                    emitStepStarted(runId, 2, "Executing " + actionType + " UI action");
+
+                    SpotifyClicker.clickSearchWithRetry((clickSuccess, clickMsg, reasonCode) -> {
+                        if (clickSuccess) {
+                            emitStepOk(runId, 2, clickMsg);
+                            emitCommandDone(runId, "SUCCESS", true);
+                        } else {
+                            emitStepFailed(runId, 2, reasonCode != null ? reasonCode : "UI_ELEMENT_NOT_FOUND");
+                            emitCommandDone(runId, "FAILED", false);
+                        }
+                        latch.countDown();
+                    });
                 });
             });
-        });
+        }
     }
 
     // --- EVENT EMITTERS ---
