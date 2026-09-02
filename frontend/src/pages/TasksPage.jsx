@@ -64,7 +64,8 @@ export default function TasksPage({ onNavigateToBuilder }) {
 
       let updatedStatus = currentExec.status;
       if (event_type === 'COMMAND_DONE') {
-        updatedStatus = payload?.status === 'SUCCESS' ? 'SUCCESS' : 'FAILED';
+        const finalStatus = lastEvent.status || payload?.status || (payload?.result !== false ? 'SUCCESS' : 'FAILED');
+        updatedStatus = finalStatus === 'SUCCESS' ? 'SUCCESS' : 'FAILED';
       } else if (event_type === 'STEP_FAILED') {
         updatedStatus = 'FAILED';
       }
