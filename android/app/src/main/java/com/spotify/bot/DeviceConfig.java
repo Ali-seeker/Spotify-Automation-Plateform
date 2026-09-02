@@ -16,7 +16,7 @@ public class DeviceConfig {
     private static final String KEY_SERVER_URL = "server_url";
     private static final String KEY_AUTH_TOKEN = "device_auth_token";
 
-    public static final String DEFAULT_SERVER_URL = "ws://10.0.2.2:8000/ws/device";
+    public static final String DEFAULT_SERVER_URL = "ws://192.168.1.35:8000/ws/device";
     public static final String DEFAULT_AUTH_TOKEN = "device_shared_secret_for_auth_123";
 
     /**
