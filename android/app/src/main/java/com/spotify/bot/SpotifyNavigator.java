@@ -322,7 +322,6 @@ public class SpotifyNavigator {
 
         String[] searchTexts = {
                 "What do you want to listen to?",
-                "Search",
                 "Browse all",
                 "Explore"
         };
@@ -334,12 +333,12 @@ public class SpotifyNavigator {
             }
         }
 
-        // Check if search tab node itself is selected
+        // Check if Search tab node is checked/selected
         AccessibilityNodeInfo searchTab = findSearchTabNode(root);
         if (searchTab != null) {
-            boolean isSelected = searchTab.isSelected();
+            boolean isChecked = isTabCheckedOrSelected(searchTab);
             searchTab.recycle();
-            if (isSelected) return true;
+            if (isChecked) return true;
         }
 
         return false;
@@ -354,13 +353,20 @@ public class SpotifyNavigator {
             List<AccessibilityNodeInfo> nodes = root.findAccessibilityNodeInfosByViewId(id);
             if (nodes != null && !nodes.isEmpty()) {
                 for (AccessibilityNodeInfo n : nodes) {
-                    if (n.isSelected()) {
+                    if (n.isSelected() || n.isChecked()) {
                         n.recycle();
                         return true;
                     }
                     n.recycle();
                 }
             }
+        }
+
+        AccessibilityNodeInfo homeTab = findHomeTabNode(root);
+        if (homeTab != null) {
+            boolean isChecked = isTabCheckedOrSelected(homeTab);
+            homeTab.recycle();
+            if (isChecked) return true;
         }
 
         String[] texts = {"Good morning", "Good afternoon", "Good evening", "Recently played", "Made for you"};
@@ -383,7 +389,7 @@ public class SpotifyNavigator {
             List<AccessibilityNodeInfo> nodes = root.findAccessibilityNodeInfosByViewId(id);
             if (nodes != null && !nodes.isEmpty()) {
                 for (AccessibilityNodeInfo n : nodes) {
-                    if (n.isSelected()) {
+                    if (n.isSelected() || n.isChecked()) {
                         n.recycle();
                         return true;
                     }
@@ -392,10 +398,29 @@ public class SpotifyNavigator {
             }
         }
 
+        AccessibilityNodeInfo libTab = findLibraryTabNode(root);
+        if (libTab != null) {
+            boolean isChecked = isTabCheckedOrSelected(libTab);
+            libTab.recycle();
+            if (isChecked) return true;
+        }
+
         List<AccessibilityNodeInfo> nodes = root.findAccessibilityNodeInfosByText("Your Library");
         if (nodes != null && !nodes.isEmpty()) {
             for (AccessibilityNodeInfo n : nodes) n.recycle();
             return true;
+        }
+        return false;
+    }
+
+    private static boolean isTabCheckedOrSelected(AccessibilityNodeInfo node) {
+        if (node == null) return false;
+        if (node.isChecked() || node.isSelected()) return true;
+        AccessibilityNodeInfo parent = node.getParent();
+        if (parent != null) {
+            boolean pVal = parent.isChecked() || parent.isSelected();
+            parent.recycle();
+            if (pVal) return true;
         }
         return false;
     }
@@ -461,15 +486,7 @@ public class SpotifyNavigator {
                 return found;
             }
         }
-        List<AccessibilityNodeInfo> textNodes = root.findAccessibilityNodeInfosByText("Search");
-        if (textNodes != null && !textNodes.isEmpty()) {
-            AccessibilityNodeInfo found = textNodes.get(0);
-            for (int i = 1; i < textNodes.size(); i++) textNodes.get(i).recycle();
-            return found;
-        }
-
-        // DFS Fallback for Content Description containing "Search" or "Find"
-        return findNodeByDfs(root, "search", "find");
+        return findNodeByDfs(root, "search, tab", "search");
     }
 
     private static AccessibilityNodeInfo findHomeTabNode(AccessibilityNodeInfo root) {
@@ -485,13 +502,7 @@ public class SpotifyNavigator {
                 return found;
             }
         }
-        List<AccessibilityNodeInfo> textNodes = root.findAccessibilityNodeInfosByText("Home");
-        if (textNodes != null && !textNodes.isEmpty()) {
-            AccessibilityNodeInfo found = textNodes.get(0);
-            for (int i = 1; i < textNodes.size(); i++) textNodes.get(i).recycle();
-            return found;
-        }
-        return findNodeByDfs(root, "home");
+        return findNodeByDfs(root, "home, tab", "home");
     }
 
     private static AccessibilityNodeInfo findLibraryTabNode(AccessibilityNodeInfo root) {
@@ -507,13 +518,7 @@ public class SpotifyNavigator {
                 return found;
             }
         }
-        List<AccessibilityNodeInfo> textNodes = root.findAccessibilityNodeInfosByText("Your Library");
-        if (textNodes != null && !textNodes.isEmpty()) {
-            AccessibilityNodeInfo found = textNodes.get(0);
-            for (int i = 1; i < textNodes.size(); i++) textNodes.get(i).recycle();
-            return found;
-        }
-        return findNodeByDfs(root, "library");
+        return findNodeByDfs(root, "your library, tab", "library");
     }
 
     private static AccessibilityNodeInfo findNowPlayingBarNode(AccessibilityNodeInfo root) {
