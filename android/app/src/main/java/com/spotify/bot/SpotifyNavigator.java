@@ -84,6 +84,11 @@ public class SpotifyNavigator {
             return SpotifyScreen.HOME;
         }
 
+        // Fallback: If Spotify is foreground and bottom nav tabs exist, treat as HOME/Main screen
+        if (hasBottomNavigation(root)) {
+            return SpotifyScreen.HOME;
+        }
+
         return SpotifyScreen.UNKNOWN_SCREEN;
     }
 
@@ -149,22 +154,27 @@ public class SpotifyNavigator {
                 return;
             }
 
-            // 4. Recovery if UNKNOWN_SCREEN
-            if (currentScreen == SpotifyScreen.UNKNOWN_SCREEN) {
+            // 4. Try locating Target Navigation Node FIRST before attempting BACK recovery
+            AccessibilityNodeInfo targetNode = findTargetNavigationNode(root, targetScreen);
+
+            // 5. If Target Node not found and screen is UNKNOWN, attempt BACK recovery
+            if (targetNode == null && currentScreen == SpotifyScreen.UNKNOWN_SCREEN) {
                 if (root != null) root.recycle();
                 currentScreen = recoverFromUnknownScreen(service);
-                if (currentScreen == SpotifyScreen.UNKNOWN_SCREEN) {
+
+                root = service.getRootInActiveWindow();
+                targetNode = findTargetNavigationNode(root, targetScreen);
+
+                if (targetNode == null) {
                     Log.e(TAG, String.format("[%s] NAVIGATION_FAILED target=%s reason_code=UNKNOWN_SCREEN",
                             getIsoUtcTimestamp(), targetScreen.name()));
+                    if (root != null) root.recycle();
                     emitStepFailed(context, runId, "UNKNOWN_SCREEN");
                     if (callback != null) callback.onResult(false, SpotifyScreen.UNKNOWN_SCREEN, "UNKNOWN_SCREEN");
                     return;
                 }
-                root = service.getRootInActiveWindow();
             }
 
-            // 5. Locate Target Navigation Node
-            AccessibilityNodeInfo targetNode = findTargetNavigationNode(root, targetScreen);
             if (targetNode == null) {
                 Log.e(TAG, String.format("[%s] NAVIGATION_FAILED target=%s reason_code=NAVIGATION_FAILED (Node not found)",
                         getIsoUtcTimestamp(), targetScreen.name()));
@@ -249,6 +259,21 @@ public class SpotifyNavigator {
     }
 
     // --- SCREEN DETECTORS ---
+
+    private static boolean hasBottomNavigation(AccessibilityNodeInfo root) {
+        if (root == null) return false;
+        AccessibilityNodeInfo searchTab = findSearchTabNode(root);
+        if (searchTab != null) {
+            searchTab.recycle();
+            return true;
+        }
+        AccessibilityNodeInfo homeTab = findHomeTabNode(root);
+        if (homeTab != null) {
+            homeTab.recycle();
+            return true;
+        }
+        return false;
+    }
 
     private static boolean isNowPlayingScreen(AccessibilityNodeInfo root) {
         String[] viewIds = {
@@ -335,7 +360,7 @@ public class SpotifyNavigator {
             }
         }
 
-        String[] texts = {"Good morning", "Good afternoon", "Good evening", "Recently played", "Made for you"};
+        String[] texts = {"Good morning", "Good afternoon", "Good evening", "Recently played", "Made for you", "Music", "Podcasts"};
         for (String t : texts) {
             List<AccessibilityNodeInfo> nodes = root.findAccessibilityNodeInfosByText(t);
             if (nodes != null && !nodes.isEmpty()) {
@@ -434,7 +459,9 @@ public class SpotifyNavigator {
             for (int i = 1; i < textNodes.size(); i++) textNodes.get(i).recycle();
             return found;
         }
-        return null;
+
+        // DFS Fallback for Content Description containing "Search" or "Find"
+        return findNodeByDfs(root, "search", "find");
     }
 
     private static AccessibilityNodeInfo findHomeTabNode(AccessibilityNodeInfo root) {
@@ -456,7 +483,7 @@ public class SpotifyNavigator {
             for (int i = 1; i < textNodes.size(); i++) textNodes.get(i).recycle();
             return found;
         }
-        return null;
+        return findNodeByDfs(root, "home");
     }
 
     private static AccessibilityNodeInfo findLibraryTabNode(AccessibilityNodeInfo root) {
@@ -478,7 +505,7 @@ public class SpotifyNavigator {
             for (int i = 1; i < textNodes.size(); i++) textNodes.get(i).recycle();
             return found;
         }
-        return null;
+        return findNodeByDfs(root, "library");
     }
 
     private static AccessibilityNodeInfo findNowPlayingBarNode(AccessibilityNodeInfo root) {
@@ -493,6 +520,34 @@ public class SpotifyNavigator {
                 AccessibilityNodeInfo found = nodes.get(0);
                 for (int i = 1; i < nodes.size(); i++) nodes.get(i).recycle();
                 return found;
+            }
+        }
+        return null;
+    }
+
+    private static AccessibilityNodeInfo findNodeByDfs(AccessibilityNodeInfo node, String... keywords) {
+        if (node == null) return null;
+
+        CharSequence descChar = node.getContentDescription();
+        CharSequence textChar = node.getText();
+        String resId = node.getViewIdResourceName();
+
+        String desc = descChar != null ? descChar.toString().toLowerCase() : "";
+        String text = textChar != null ? textChar.toString().toLowerCase() : "";
+        String res = resId != null ? resId.toLowerCase() : "";
+
+        for (String kw : keywords) {
+            if (desc.contains(kw) || text.contains(kw) || res.contains(kw)) {
+                return AccessibilityNodeInfo.obtain(node);
+            }
+        }
+
+        for (int i = 0; i < node.getChildCount(); i++) {
+            AccessibilityNodeInfo child = node.getChild(i);
+            if (child != null) {
+                AccessibilityNodeInfo result = findNodeByDfs(child, keywords);
+                child.recycle();
+                if (result != null) return result;
             }
         }
         return null;
