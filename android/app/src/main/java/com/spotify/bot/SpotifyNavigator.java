@@ -511,9 +511,7 @@ public class SpotifyNavigator {
     private static AccessibilityNodeInfo findSearchTabNode(AccessibilityNodeInfo root) {
         String[] ids = {
                 "com.spotify.music:id/search_tab",
-                "com.spotify.music:id/bottom_navigation_search",
-                "com.spotify.music:id/find_search_field",
-                "com.spotify.music:id/search"
+                "com.spotify.music:id/bottom_navigation_search"
         };
         for (String id : ids) {
             List<AccessibilityNodeInfo> nodes = root.findAccessibilityNodeInfosByViewId(id);
@@ -523,7 +521,7 @@ public class SpotifyNavigator {
                 return found;
             }
         }
-        return findNodeByDfs(root, "search, tab", "search");
+        return findNodeByDfs(root, "search, tab");
     }
 
     private static AccessibilityNodeInfo findHomeTabNode(AccessibilityNodeInfo root) {
@@ -539,7 +537,7 @@ public class SpotifyNavigator {
                 return found;
             }
         }
-        return findNodeByDfs(root, "home, tab", "home");
+        return findNodeByDfs(root, "home, tab");
     }
 
     private static AccessibilityNodeInfo findLibraryTabNode(AccessibilityNodeInfo root) {
@@ -555,7 +553,7 @@ public class SpotifyNavigator {
                 return found;
             }
         }
-        return findNodeByDfs(root, "your library, tab", "library");
+        return findNodeByDfs(root, "your library, tab");
     }
 
     private static AccessibilityNodeInfo findNowPlayingBarNode(AccessibilityNodeInfo root) {
