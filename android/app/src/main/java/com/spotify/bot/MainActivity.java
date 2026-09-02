@@ -16,7 +16,6 @@ import android.widget.TextView;
 import android.widget.Toast;
 import androidx.appcompat.app.AppCompatActivity;
 
-import org.json.JSONException;
 import org.json.JSONObject;
 
 public class MainActivity extends AppCompatActivity implements WebSocketClientManager.StateListener {
@@ -250,121 +249,14 @@ public class MainActivity extends AppCompatActivity implements WebSocketClientMa
 
     @Override
     public void onCommandReceived(JSONObject commandPayload) {
-        Log.i(TAG, "Command received on device: " + commandPayload.toString());
-        String runId = commandPayload.optString("run_id", "");
-        String actionType = commandPayload.optString("action_type", "");
+        Log.i(TAG, "Command payload received on device: " + commandPayload.toString());
+        String actionType = commandPayload.optString("action_type", "Task");
 
-        Toast.makeText(this, "Executing Command: " + actionType, Toast.LENGTH_SHORT).show();
+        mainHandler.post(() ->
+            Toast.makeText(this, "Enqueued Command: " + actionType, Toast.LENGTH_SHORT).show()
+        );
 
-        // Dispatch command execution to automation engine
-        new Thread(() -> {
-            try {
-                // 1. Emit STEP_STARTED
-                JSONObject step1Started = new JSONObject();
-                step1Started.put("type", "STEP_STARTED");
-                step1Started.put("run_id", runId);
-                JSONObject p1 = new JSONObject();
-                p1.put("step_index", 1);
-                p1.put("step_name", "Initiating Spotify Launch");
-                step1Started.put("payload", p1);
-                wsManager.sendEventPayload(step1Started);
-
-                // 2. Launch Spotify
-                SpotifyLauncher.launchSpotify(MainActivity.this, (launchSuccess, launchMsg) -> {
-                    try {
-                        if (launchSuccess) {
-                            JSONObject step1Ok = new JSONObject();
-                            step1Ok.put("type", "STEP_OK");
-                            step1Ok.put("run_id", runId);
-                            JSONObject p1Ok = new JSONObject();
-                            p1Ok.put("step_index", 1);
-                            p1Ok.put("step_name", "Spotify Launched & Foreground Verified");
-                            step1Ok.put("payload", p1Ok);
-                            wsManager.sendEventPayload(step1Ok);
-
-                            // Perform Action (e.g. CLICK / SEARCH)
-                            JSONObject step2Started = new JSONObject();
-                            step2Started.put("type", "STEP_STARTED");
-                            step2Started.put("run_id", runId);
-                            JSONObject p2 = new JSONObject();
-                            p2.put("step_index", 2);
-                            p2.put("step_name", "Executing " + actionType + " UI action");
-                            step2Started.put("payload", p2);
-                            wsManager.sendEventPayload(step2Started);
-
-                            Thread.sleep(800);
-
-                            SpotifyClicker.clickSearchWithRetry((clickSuccess, clickMsg, reasonCode) -> {
-                                try {
-                                    if (clickSuccess) {
-                                        JSONObject step2Ok = new JSONObject();
-                                        step2Ok.put("type", "STEP_OK");
-                                        step2Ok.put("run_id", runId);
-                                        JSONObject p2Ok = new JSONObject();
-                                        p2Ok.put("step_index", 2);
-                                        p2Ok.put("step_name", clickMsg);
-                                        step2Ok.put("payload", p2Ok);
-                                        wsManager.sendEventPayload(step2Ok);
-
-                                        JSONObject done = new JSONObject();
-                                        done.put("type", "COMMAND_DONE");
-                                        done.put("run_id", runId);
-                                        done.put("status", "SUCCESS");
-                                        JSONObject pDone = new JSONObject();
-                                        pDone.put("result", true);
-                                        done.put("payload", pDone);
-                                        wsManager.sendEventPayload(done);
-                                    } else {
-                                        JSONObject step2Failed = new JSONObject();
-                                        step2Failed.put("type", "STEP_FAILED");
-                                        step2Failed.put("run_id", runId);
-                                        JSONObject pFailed = new JSONObject();
-                                        pFailed.put("step_index", 2);
-                                        pFailed.put("reason_code", reasonCode != null ? reasonCode : "UI_ELEMENT_NOT_FOUND");
-                                        step2Failed.put("payload", pFailed);
-                                        wsManager.sendEventPayload(step2Failed);
-
-                                        JSONObject done = new JSONObject();
-                                        done.put("type", "COMMAND_DONE");
-                                        done.put("run_id", runId);
-                                        done.put("status", "FAILED");
-                                        JSONObject pDone = new JSONObject();
-                                        pDone.put("result", false);
-                                        done.put("payload", pDone);
-                                        wsManager.sendEventPayload(done);
-                                    }
-                                } catch (Exception e) {
-                                    Log.e(TAG, "Error building step response", e);
-                                }
-                            });
-
-                        } else {
-                            JSONObject step1Failed = new JSONObject();
-                            step1Failed.put("type", "STEP_FAILED");
-                            step1Failed.put("run_id", runId);
-                            JSONObject pFailed = new JSONObject();
-                            pFailed.put("step_index", 1);
-                            pFailed.put("reason_code", "SPOTIFY_LAUNCH_FAILED");
-                            step1Failed.put("payload", pFailed);
-                            wsManager.sendEventPayload(step1Failed);
-
-                            JSONObject done = new JSONObject();
-                            done.put("type", "COMMAND_DONE");
-                            done.put("run_id", runId);
-                            done.put("status", "FAILED");
-                            JSONObject pDone = new JSONObject();
-                            pDone.put("result", false);
-                            done.put("payload", pDone);
-                            wsManager.sendEventPayload(done);
-                        }
-                    } catch (Exception e) {
-                        Log.e(TAG, "Error handling command execution", e);
-                    }
-                });
-
-            } catch (Exception e) {
-                Log.e(TAG, "Error starting command execution thread", e);
-            }
-        }).start();
+        // Delegate command execution to FIFO Command Queue Manager
+        CommandQueueManager.getInstance(this).enqueueCommand(commandPayload);
     }
 }
