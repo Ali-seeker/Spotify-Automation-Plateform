@@ -49,7 +49,6 @@ public class WebSocketClientManager {
     private boolean isUserDisconnect = false;
     private boolean allowReconnect = true;
     private int reconnectAttempts = 0;
-    private static final int MAX_RECONNECT_ATTEMPTS = 5;
     private static final long INITIAL_RECONNECT_DELAY_MS = 2000;
 
     private WebSocketClientManager(Context context) {
@@ -174,17 +173,11 @@ public class WebSocketClientManager {
             return;
         }
 
-        if (reconnectAttempts >= MAX_RECONNECT_ATTEMPTS) {
-            Log.w(TAG, String.format("Max reconnect attempts (%d) reached. Pausing auto-reconnect.", MAX_RECONNECT_ATTEMPTS));
-            updateState(ConnectionState.DISCONNECTED, "Max reconnect attempts reached. Tap Connect to retry.");
-            return;
-        }
-
         reconnectAttempts++;
-        long delayMs = (long) (INITIAL_RECONNECT_DELAY_MS * Math.pow(2, reconnectAttempts - 1));
-        delayMs = Math.min(delayMs, 30000); // Cap at 30 seconds
+        long delayMs = (long) (INITIAL_RECONNECT_DELAY_MS * Math.pow(2, Math.min(reconnectAttempts - 1, 4)));
+        delayMs = Math.min(delayMs, 10000); // Cap reconnect delay at 10 seconds for fast persistent reconnection
 
-        Log.i(TAG, String.format("Scheduling reconnect attempt %d/%d in %d ms", reconnectAttempts, MAX_RECONNECT_ATTEMPTS, delayMs));
+        Log.i(TAG, String.format("Scheduling continuous auto-reconnect attempt %d in %d ms", reconnectAttempts, delayMs));
         mainHandler.postDelayed(this::connect, delayMs);
     }
 
@@ -245,7 +238,7 @@ public class WebSocketClientManager {
         public void onClosed(WebSocket ws, int code, String reason) {
             Log.i(TAG, String.format("WEBSOCKET_DISCONNECTED onClosed code=%d, reason=%s", code, reason));
             mainHandler.post(() -> {
-                if (currentState != ConnectionState.REJECTED) {
+                if (currentState != ConnectionState.REJECTED && !isUserDisconnect) {
                     updateState(ConnectionState.DISCONNECTED, "Connection closed");
                     scheduleReconnect();
                 }
@@ -256,7 +249,7 @@ public class WebSocketClientManager {
         public void onFailure(WebSocket ws, Throwable t, Response response) {
             Log.e(TAG, "WEBSOCKET_ERROR Failure: " + t.getMessage(), t);
             mainHandler.post(() -> {
-                if (currentState != ConnectionState.REJECTED) {
+                if (currentState != ConnectionState.REJECTED && !isUserDisconnect) {
                     updateState(ConnectionState.DISCONNECTED, "Connection error: " + t.getMessage());
                     scheduleReconnect();
                 }
