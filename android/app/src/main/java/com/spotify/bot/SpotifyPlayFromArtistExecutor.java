@@ -561,7 +561,11 @@ public class SpotifyPlayFromArtistExecutor {
             boolean clicked = performClickOnNodeOrAncestor(radioNode);
             radioNode.recycle();
             root.recycle();
-            if (clicked) return true;
+            if (clicked) {
+                try { Thread.sleep(2000); } catch (InterruptedException ignored) {}
+                return triggerPlaylistPlayback(service);
+            }
+            return false;
         }
 
         // 2. Try Context Menu (3-dots overflow menu on Artist Page)
@@ -580,7 +584,11 @@ public class SpotifyPlayFromArtistExecutor {
                         boolean clicked = performClickOnNodeOrAncestor(radioOption);
                         radioOption.recycle();
                         menuRoot.recycle();
-                        return clicked;
+                        if (clicked) {
+                            try { Thread.sleep(2000); } catch (InterruptedException ignored) {}
+                            return triggerPlaylistPlayback(service);
+                        }
+                        return false;
                     }
                     menuRoot.recycle();
                 }
@@ -592,7 +600,11 @@ public class SpotifyPlayFromArtistExecutor {
         // 3. Fallback: Search "<Artist> Radio"
         String radioQuery = artistName + " Radio";
         Log.i(TAG, "Artist Radio not found in menu/page. Fallback search: " + radioQuery);
-        return fallbackSearchAndOpenPlaylist(service, context, runId, radioQuery);
+        boolean opened = fallbackSearchAndOpenPlaylist(service, context, runId, radioQuery);
+        if (opened) {
+            return triggerPlaylistPlayback(service);
+        }
+        return false;
     }
 
     // --- PLAYBACK VERIFICATION (10 Seconds Strict) ---
