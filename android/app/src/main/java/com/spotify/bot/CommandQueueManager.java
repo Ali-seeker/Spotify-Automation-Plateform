@@ -122,20 +122,20 @@ public class CommandQueueManager {
                     Log.w(TAG, String.format("[%s] COMMAND_EXPIRED: TTL expired prior to execution for command_id=%s",
                             getIsoUtcTimestamp(), commandId));
                     emitStepFailed(runId, 1, "COMMAND_EXPIRED");
-                    emitCommandDone(runId, "FAILED", false);
+                    emitCommandDone(runId, "FAILED", false, "COMMAND_EXPIRED");
                     activeInFlightCommand.set(null);
                     continue;
                 }
 
                 // 4. EXECUTE COMMAND LIFE-CYCLE
                 executeCommandWithLatch(command, latch);
-                latch.await(35, TimeUnit.SECONDS); // Wait for async UI callbacks
+                latch.await(60, TimeUnit.SECONDS); // Wait for async UI callbacks (with paced human delays)
 
             } catch (Throwable t) {
                 Log.e(TAG, String.format("[%s] UNHANDLED_EXCEPTION during command execution for run_id=%s",
                         getIsoUtcTimestamp(), runId), t);
                 emitStepFailed(runId, 1, "UNHANDLED_EXCEPTION");
-                emitCommandDone(runId, "FAILED", false);
+                emitCommandDone(runId, "FAILED", false, "UNHANDLED_EXCEPTION");
             } finally {
                 activeInFlightCommand.set(null);
             }
@@ -204,16 +204,28 @@ public class CommandQueueManager {
         String runId = command.optString("run_id", "");
         String actionType = command.optString("action_type", "CLICK");
 
-        if (actionType.equalsIgnoreCase("spotify.search")
+        if (actionType.equalsIgnoreCase("spotify.play_from_artist")
+                || actionType.equalsIgnoreCase("PLAY_FROM_ARTIST")
+                || actionType.equalsIgnoreCase("PLAY_ARTIST")) {
+
+            SpotifyPlayFromArtistExecutor.executePlayFromArtist(context, command, (success, message, reasonCode) -> {
+                if (success) {
+                    emitCommandDone(runId, "SUCCESS", true, null);
+                } else {
+                    emitCommandDone(runId, "FAILED", false, reasonCode);
+                }
+                latch.countDown();
+            });
+        } else if (actionType.equalsIgnoreCase("spotify.search")
                 || actionType.equalsIgnoreCase("SEARCH")
                 || actionType.equalsIgnoreCase("SEARCH_AND_PLAY")
                 || actionType.equalsIgnoreCase("CLICK_SEARCH")) {
 
             SpotifySearchExecutor.executeSearch(context, command, (success, matchedTitle, reasonCode) -> {
                 if (success) {
-                    emitCommandDone(runId, "SUCCESS", true);
+                    emitCommandDone(runId, "SUCCESS", true, null);
                 } else {
-                    emitCommandDone(runId, "FAILED", false);
+                    emitCommandDone(runId, "FAILED", false, reasonCode);
                 }
                 latch.countDown();
             });
@@ -223,7 +235,7 @@ public class CommandQueueManager {
             SpotifyLauncher.launchSpotify(context, (launchSuccess, launchMsg) -> {
                 if (!launchSuccess) {
                     emitStepFailed(runId, 1, "SPOTIFY_LAUNCH_FAILED");
-                    emitCommandDone(runId, "FAILED", false);
+                    emitCommandDone(runId, "FAILED", false, "SPOTIFY_LAUNCH_FAILED");
                     latch.countDown();
                     return;
                 }
@@ -232,7 +244,7 @@ public class CommandQueueManager {
 
                 SpotifyNavigator.goToSearch(context, runId, (navSuccess, finalScreen, navReason) -> {
                     if (!navSuccess) {
-                        emitCommandDone(runId, "FAILED", false);
+                        emitCommandDone(runId, "FAILED", false, navReason);
                         latch.countDown();
                         return;
                     }
@@ -242,10 +254,10 @@ public class CommandQueueManager {
                     SpotifyClicker.clickSearchWithRetry((clickSuccess, clickMsg, reasonCode) -> {
                         if (clickSuccess) {
                             emitStepOk(runId, 2, clickMsg);
-                            emitCommandDone(runId, "SUCCESS", true);
+                            emitCommandDone(runId, "SUCCESS", true, null);
                         } else {
                             emitStepFailed(runId, 2, reasonCode != null ? reasonCode : "UI_ELEMENT_NOT_FOUND");
-                            emitCommandDone(runId, "FAILED", false);
+                            emitCommandDone(runId, "FAILED", false, reasonCode != null ? reasonCode : "UI_ELEMENT_NOT_FOUND");
                         }
                         latch.countDown();
                     });
@@ -265,6 +277,7 @@ public class CommandQueueManager {
             JSONObject payload = new JSONObject();
             payload.put("step_index", stepIndex);
             payload.put("step_name", stepName);
+            payload.put("action", stepName);
             event.put("payload", payload);
 
             Log.i(TAG, String.format("[%s] STEP_STARTED [Step %d]: %s", getIsoUtcTimestamp(), stepIndex, stepName));
@@ -283,6 +296,7 @@ public class CommandQueueManager {
             JSONObject payload = new JSONObject();
             payload.put("step_index", stepIndex);
             payload.put("step_name", stepName);
+            payload.put("action", stepName);
             event.put("payload", payload);
 
             Log.i(TAG, String.format("[%s] STEP_OK [Step %d]: %s", getIsoUtcTimestamp(), stepIndex, stepName));
@@ -300,7 +314,10 @@ public class CommandQueueManager {
 
             JSONObject payload = new JSONObject();
             payload.put("step_index", stepIndex);
+            payload.put("step_name", "Step failed");
+            payload.put("action", "Step failed");
             payload.put("reason_code", reasonCode);
+            payload.put("error", reasonCode);
             event.put("payload", payload);
 
             Log.e(TAG, String.format("[%s] STEP_FAILED [Step %d]: reason_code=%s", getIsoUtcTimestamp(), stepIndex, reasonCode));
@@ -310,7 +327,7 @@ public class CommandQueueManager {
         }
     }
 
-    private void emitCommandDone(String runId, String status, boolean result) {
+    private void emitCommandDone(String runId, String status, boolean result, String errorReason) {
         try {
             JSONObject event = new JSONObject();
             event.put("type", "COMMAND_DONE");
@@ -319,12 +336,20 @@ public class CommandQueueManager {
 
             JSONObject payload = new JSONObject();
             payload.put("result", result);
+            if (errorReason != null) {
+                payload.put("reason_code", errorReason);
+                payload.put("error", errorReason);
+            }
             event.put("payload", payload);
 
-            Log.i(TAG, String.format("[%s] COMMAND_DONE: status=%s, result=%b", getIsoUtcTimestamp(), status, result));
+            Log.i(TAG, String.format("[%s] COMMAND_DONE: status=%s, result=%b, reason=%s", getIsoUtcTimestamp(), status, result, errorReason));
             WebSocketClientManager.getInstance(context).sendEventPayload(event);
         } catch (JSONException e) {
             Log.e(TAG, "Error emitting COMMAND_DONE", e);
         }
+    }
+
+    private void emitCommandDone(String runId, String status, boolean result) {
+        emitCommandDone(runId, status, result, null);
     }
 }

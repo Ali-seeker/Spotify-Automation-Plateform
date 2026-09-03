@@ -14,25 +14,15 @@ export default function TasksPage({ onNavigateToBuilder }) {
   // taskId -> { runId, status: 'QUEUED'|'RUNNING'|'SUCCESS'|'FAILED', steps: [], error: string }
   const [taskExecutions, setTaskExecutions] = useState({});
 
-  const { isConnected, deviceUpdates, lastEvent } = useFrontendWebSocket();
-
-  useEffect(() => {
-    fetchInitialData();
-  }, []);
-
-  // Listen for real-time WebSocket events and correlate them with active task executions
-  useEffect(() => {
-    if (!lastEvent || lastEvent.type !== 'DEVICE_EVENT') return;
-
-    const { run_id, event_type, payload } = lastEvent;
+  const handleDeviceEvent = (eventData) => {
+    if (!eventData || eventData.type !== 'DEVICE_EVENT') return;
+    const { run_id, event_type, payload } = eventData;
     if (!run_id) return;
 
     setTaskExecutions((prevExecs) => {
-      // Find matching task execution by run_id
       const targetTaskId = Object.keys(prevExecs).find(
         (tid) => prevExecs[tid]?.runId === run_id
       );
-
       if (!targetTaskId) return prevExecs;
 
       const currentExec = prevExecs[targetTaskId];
@@ -64,8 +54,21 @@ export default function TasksPage({ onNavigateToBuilder }) {
 
       let updatedStatus = currentExec.status;
       if (event_type === 'COMMAND_DONE') {
-        const finalStatus = lastEvent.status || payload?.status || (payload?.result !== false ? 'SUCCESS' : 'FAILED');
+        const finalStatus = eventData.status || payload?.status || (payload?.result !== false ? 'SUCCESS' : 'FAILED');
         updatedStatus = finalStatus === 'SUCCESS' ? 'SUCCESS' : 'FAILED';
+        if (updatedStatus === 'FAILED') {
+          const lastStep = newSteps[newSteps.length - 1];
+          if (!lastStep || lastStep.event_type !== 'STEP_FAILED') {
+            const reason = payload?.reason_code || payload?.error || 'COMMAND_EXECUTION_FAILED';
+            newSteps.push({
+              step_index: newSteps.length + 1,
+              event_type: 'STEP_FAILED',
+              action: 'Step failed',
+              reason_code: reason,
+              timestamp: new Date().toLocaleTimeString()
+            });
+          }
+        }
       } else if (event_type === 'STEP_FAILED') {
         updatedStatus = 'FAILED';
       }
@@ -79,7 +82,13 @@ export default function TasksPage({ onNavigateToBuilder }) {
         }
       };
     });
-  }, [lastEvent]);
+  };
+
+  const { isConnected, deviceUpdates } = useFrontendWebSocket(handleDeviceEvent);
+
+  useEffect(() => {
+    fetchInitialData();
+  }, []);
 
   const fetchInitialData = async () => {
     setLoading(true);
