@@ -1223,7 +1223,10 @@ public class SpotifyPlayFromArtistExecutor {
 
             JSONObject payload = extraPayload != null ? extraPayload : new JSONObject();
             payload.put("step_index", stepIndex);
+            payload.put("step_name", "Step failed");
+            payload.put("action", "Step failed");
             payload.put("reason_code", reasonCode);
+            payload.put("error", reasonCode);
             event.put("payload", payload);
 
             Log.e(TAG, String.format("[%s] STEP_FAILED [Step %d]: reason_code=%s", getIsoUtcTimestamp(), stepIndex, reasonCode));
