@@ -444,10 +444,14 @@ public class SpotifyPlayFromArtistExecutor {
         }
         if (!searchNav[0]) return false;
 
-        AccessibilityNodeInfo root = service.getRootInActiveWindow();
-        AccessibilityNodeInfo input = SpotifySearchExecutor.locateSearchInputField(root);
-        if (root != null) root.recycle();
+        AccessibilityNodeInfo input = locateAndActivateSearchInput(service);
         if (input == null) return false;
+
+        Bundle clearArgs = new Bundle();
+        clearArgs.putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, "");
+        input.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, clearArgs);
+
+        try { Thread.sleep(400); } catch (InterruptedException ignored) {}
 
         Bundle setTextArgs = new Bundle();
         setTextArgs.putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, playlistQuery);
@@ -468,7 +472,8 @@ public class SpotifyPlayFromArtistExecutor {
         SpotifySearchResultParser.ResultItem bestPlaylist = null;
         for (SpotifySearchResultParser.ResultItem item : results) {
             SpotifyFuzzyMatcher.MatchResult match = SpotifyFuzzyMatcher.evaluateMatch(playlistQuery, item.title);
-            if (match.isMatched) {
+            if (match.isMatched || item.title.toLowerCase(Locale.ROOT).contains(playlistQuery.toLowerCase(Locale.ROOT))
+                    || playlistQuery.toLowerCase(Locale.ROOT).contains(item.title.toLowerCase(Locale.ROOT))) {
                 bestPlaylist = item;
                 break;
             }
@@ -478,11 +483,9 @@ public class SpotifyPlayFromArtistExecutor {
         if (bestPlaylist != null && bestPlaylist.node != null) {
             clicked = performClickOnNodeOrAncestor(bestPlaylist.node);
         }
-
         for (SpotifySearchResultParser.ResultItem item : results) {
             if (item.node != null) item.node.recycle();
         }
-
         return clicked;
     }
 
