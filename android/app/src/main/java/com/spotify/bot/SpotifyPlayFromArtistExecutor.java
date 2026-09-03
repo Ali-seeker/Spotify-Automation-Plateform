@@ -848,15 +848,26 @@ public class SpotifyPlayFromArtistExecutor {
     }
 
     private static boolean isArtistPageCustomCheck(AccessibilityNodeInfo root, String artistName) {
-        List<AccessibilityNodeInfo> nodes = root.findAccessibilityNodeInfosByText("Monthly listeners");
-        if (nodes != null && !nodes.isEmpty()) {
-            for (AccessibilityNodeInfo n : nodes) n.recycle();
-            return true;
-        }
-        List<AccessibilityNodeInfo> followNodes = root.findAccessibilityNodeInfosByText("Follow");
-        if (followNodes != null && !followNodes.isEmpty()) {
-            for (AccessibilityNodeInfo n : followNodes) n.recycle();
-            return true;
+        String[] keywords = {
+                "Monthly listeners",
+                "monthly listeners",
+                "Follow",
+                "Following",
+                "Popular",
+                "Discography",
+                "Shuffle",
+                "Verified Artist",
+                "verified artist",
+                artistName
+        };
+        for (String kw : keywords) {
+            if (kw != null && !kw.isEmpty()) {
+                List<AccessibilityNodeInfo> nodes = root.findAccessibilityNodeInfosByText(kw);
+                if (nodes != null && !nodes.isEmpty()) {
+                    for (AccessibilityNodeInfo n : nodes) n.recycle();
+                    return true;
+                }
+            }
         }
         return false;
     }

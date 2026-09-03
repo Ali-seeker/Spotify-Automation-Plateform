@@ -55,29 +55,29 @@ public class SpotifyNavigator {
             return SpotifyScreen.NOW_PLAYING;
         }
 
-        // 2. SEARCH_RESULTS (Search input active with results list)
-        if (isSearchResultsScreen(root)) {
-            return SpotifyScreen.SEARCH_RESULTS;
-        }
-
-        // 3. SEARCH (Search tab landing page / search bar)
-        if (isSearchScreen(root)) {
-            return SpotifyScreen.SEARCH;
-        }
-
-        // 4. ARTIST_PAGE
+        // 2. ARTIST_PAGE (Specific detail screens must be evaluated before generic navigation tabs)
         if (isArtistPageScreen(root)) {
             return SpotifyScreen.ARTIST_PAGE;
         }
 
-        // 5. ALBUM_PAGE
+        // 3. ALBUM_PAGE
         if (isAlbumPageScreen(root)) {
             return SpotifyScreen.ALBUM_PAGE;
         }
 
-        // 6. PLAYLIST_PAGE
+        // 4. PLAYLIST_PAGE
         if (isPlaylistPageScreen(root)) {
             return SpotifyScreen.PLAYLIST_PAGE;
+        }
+
+        // 5. SEARCH_RESULTS (Search input active with results list)
+        if (isSearchResultsScreen(root)) {
+            return SpotifyScreen.SEARCH_RESULTS;
+        }
+
+        // 6. SEARCH (Search tab landing page / search bar)
+        if (isSearchScreen(root)) {
+            return SpotifyScreen.SEARCH;
         }
 
         // 7. LIBRARY
@@ -487,10 +487,23 @@ public class SpotifyNavigator {
     }
 
     private static boolean isArtistPageScreen(AccessibilityNodeInfo root) {
-        List<AccessibilityNodeInfo> nodes = root.findAccessibilityNodeInfosByText("Monthly listeners");
-        if (nodes != null && !nodes.isEmpty()) {
-            for (AccessibilityNodeInfo n : nodes) n.recycle();
-            return true;
+        String[] artistKeywords = {
+                "Monthly listeners",
+                "monthly listeners",
+                "Follow",
+                "Following",
+                "Popular",
+                "Discography",
+                "Artist",
+                "verified artist",
+                "Verified Artist"
+        };
+        for (String kw : artistKeywords) {
+            List<AccessibilityNodeInfo> nodes = root.findAccessibilityNodeInfosByText(kw);
+            if (nodes != null && !nodes.isEmpty()) {
+                for (AccessibilityNodeInfo n : nodes) n.recycle();
+                return true;
+            }
         }
         return false;
     }
