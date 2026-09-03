@@ -77,6 +77,31 @@ public class SpotifyAccessibilityService extends AccessibilityService {
         return super.onUnbind(intent);
     }
 
+    public boolean clickCoordinates(float x, float y) {
+        try {
+            android.graphics.Path path = new android.graphics.Path();
+            path.moveTo(x, y);
+            android.accessibilityservice.GestureDescription.Builder builder = new android.accessibilityservice.GestureDescription.Builder();
+            builder.addStroke(new android.accessibilityservice.GestureDescription.StrokeDescription(path, 0, 50));
+            return dispatchGesture(builder.build(), null, null);
+        } catch (Exception e) {
+            Log.e(TAG, "Failed to dispatch tap gesture at (" + x + ", " + y + ")", e);
+            return false;
+        }
+    }
+
+    public boolean clickCoordinatesRatio(float xRatio, float yRatio) {
+        try {
+            android.util.DisplayMetrics dm = getResources().getDisplayMetrics();
+            float x = dm.widthPixels * xRatio;
+            float y = dm.heightPixels * yRatio;
+            return clickCoordinates(x, y);
+        } catch (Exception e) {
+            Log.e(TAG, "Failed to dispatch ratio tap gesture", e);
+            return false;
+        }
+    }
+
     @Override
     public void onDestroy() {
         Log.d(TAG, "Lifecycle: Service Destroyed");

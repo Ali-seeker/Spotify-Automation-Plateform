@@ -241,7 +241,7 @@ public class SpotifySearchExecutor {
 
     static AccessibilityNodeInfo locateAndActivateSearchInput(SpotifyAccessibilityService service) {
         long start = System.currentTimeMillis();
-        long timeoutMs = 8000;
+        long timeoutMs = 10000;
 
         while (System.currentTimeMillis() - start < timeoutMs) {
             AccessibilityNodeInfo root = service.getRootInActiveWindow();
@@ -252,25 +252,14 @@ public class SpotifySearchExecutor {
                     root.recycle();
                     return activeInput;
                 }
-
-                // 2. On Search Landing (ComposeView): Tapping the Search tab icon while already on Search tab opens the Search Active screen
-                AccessibilityNodeInfo searchTab = findSearchTabNode(root);
-                if (searchTab != null) {
-                    performClickOnNodeOrAncestor(searchTab);
-                    searchTab.recycle();
-                } else if (activeInput != null) {
-                    performClickOnNodeOrAncestor(activeInput);
-                    activeInput.recycle();
-                } else {
-                    List<AccessibilityNodeInfo> composeViews = root.findAccessibilityNodeInfosByViewId("com.spotify.music:id/compose_view");
-                    if (composeViews != null && !composeViews.isEmpty()) {
-                        composeViews.get(0).performAction(AccessibilityNodeInfo.ACTION_CLICK);
-                        for (AccessibilityNodeInfo n : composeViews) n.recycle();
-                    }
-                }
                 root.recycle();
 
-                try { Thread.sleep(1200); } catch (InterruptedException ignored) {}
+                // 2. On Search Landing (ComposeView):
+                // Dispatch direct physical touch gesture on top search bar (center X, ~8% Y)
+                Log.i(TAG, "Dispatching tap gesture to activate Compose search bar at top (0.50, 0.08)...");
+                service.clickCoordinatesRatio(0.50f, 0.08f);
+
+                try { Thread.sleep(1500); } catch (InterruptedException ignored) {}
 
                 AccessibilityNodeInfo fresh = service.getRootInActiveWindow();
                 if (fresh != null) {
@@ -285,6 +274,10 @@ public class SpotifySearchExecutor {
                     }
                     fresh.recycle();
                 }
+
+                // Backup: Tap search tab at bottom to toggle search active
+                service.clickCoordinatesRatio(0.30f, 0.98f);
+                try { Thread.sleep(1200); } catch (InterruptedException ignored) {}
             }
             try { Thread.sleep(POLL_INTERVAL_MS); } catch (InterruptedException ignored) {}
         }
