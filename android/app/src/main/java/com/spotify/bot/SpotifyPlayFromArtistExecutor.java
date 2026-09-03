@@ -653,7 +653,7 @@ public class SpotifyPlayFromArtistExecutor {
                     // Signal 2: Match expected artist or track
                     boolean artistMatch = isArtistMatch(expectedArtist, npInfo.artistName, npInfo.trackTitle, npInfo.fullDescription);
 
-                    if (artistMatch || npInfo.isPlayingState) {
+                    if (artistMatch) {
                         root.recycle();
                         long elapsed = System.currentTimeMillis() - startTime;
                         return new PlaybackVerificationResult(true, true, matchedArtist, matchedTrack, lastScreen, elapsed);
@@ -780,22 +780,19 @@ public class SpotifyPlayFromArtistExecutor {
             if ("SUGGESTION".equalsIgnoreCase(item.itemType)) {
                 continue;
             }
+
+            // Strict check: candidate MUST be an ARTIST (Profiles, Songs, Playlists, Podcasts rejected)
+            boolean isArtistType = "ARTIST".equalsIgnoreCase(item.itemType)
+                    || item.subtitle.toLowerCase(Locale.ROOT).contains("artist")
+                    || item.contentDescription.toLowerCase(Locale.ROOT).contains("artist");
+
+            if (!isArtistType) {
+                continue;
+            }
+
             double baseSimilarity = SpotifyFuzzyMatcher.computeSimilarity(expectedArtist, item.title);
-            double totalScore = baseSimilarity;
-
-            // Prioritize items explicitly typed as ARTIST
-            if ("ARTIST".equalsIgnoreCase(item.itemType) || item.contentDescription.toLowerCase(Locale.ROOT).contains("artist")
-                    || item.subtitle.toLowerCase(Locale.ROOT).contains("artist")) {
-                totalScore += 0.25;
-            }
-
-            // Reject items explicitly marked as SONG or PODCAST if not an exact match
-            if ("SONG".equalsIgnoreCase(item.itemType) || "PODCAST".equalsIgnoreCase(item.itemType)) {
-                totalScore -= 0.20;
-            }
-
-            if (baseSimilarity >= 0.50 && totalScore > bestScore) {
-                bestScore = totalScore;
+            if (baseSimilarity >= 0.70 && baseSimilarity > bestScore) {
+                bestScore = baseSimilarity;
                 bestCandidate = item;
             }
         }
@@ -938,8 +935,7 @@ public class SpotifyPlayFromArtistExecutor {
                 "Discography",
                 "Shuffle",
                 "Verified Artist",
-                "verified artist",
-                artistName
+                "verified artist"
         };
         for (String kw : keywords) {
             if (kw != null && !kw.isEmpty()) {
