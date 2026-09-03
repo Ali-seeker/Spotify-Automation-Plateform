@@ -904,35 +904,49 @@ public class SpotifyPlayFromArtistExecutor {
 
     private static AccessibilityNodeInfo locateAndActivateSearchInput(SpotifyAccessibilityService service) {
         long start = System.currentTimeMillis();
-        long timeoutMs = 5000;
+        long timeoutMs = 8000;
 
         while (System.currentTimeMillis() - start < timeoutMs) {
             AccessibilityNodeInfo root = service.getRootInActiveWindow();
             if (root != null) {
-                // 1. Direct search for editable search input
+                // 1. Direct search for active EditText / search input
                 AccessibilityNodeInfo activeInput = findActiveSearchNode(root);
-                if (activeInput != null) {
-                    if (isEditableInput(activeInput)) {
-                        root.recycle();
-                        return activeInput;
-                    }
+                if (activeInput != null && isEditableInput(activeInput)) {
+                    root.recycle();
+                    return activeInput;
+                }
 
-                    // If it's a search placeholder button (e.g. "What do you want to listen to?"), click it
-                    boolean clicked = performClickOnNodeOrAncestor(activeInput);
+                // 2. On Search Landing (ComposeView): Tapping the Search tab icon while already on Search tab opens the Search Active screen
+                AccessibilityNodeInfo searchTab = findSearchTabNode(root);
+                if (searchTab != null) {
+                    performClickOnNodeOrAncestor(searchTab);
+                    searchTab.recycle();
+                } else if (activeInput != null) {
+                    performClickOnNodeOrAncestor(activeInput);
                     activeInput.recycle();
-                    root.recycle();
-
-                    if (clicked) {
-                        try { Thread.sleep(1000); } catch (InterruptedException ignored) {}
-                        AccessibilityNodeInfo fresh = service.getRootInActiveWindow();
-                        if (fresh != null) {
-                            AccessibilityNodeInfo freshInput = findActiveSearchNode(fresh);
-                            fresh.recycle();
-                            if (freshInput != null) return freshInput;
-                        }
-                    }
                 } else {
-                    root.recycle();
+                    List<AccessibilityNodeInfo> composeViews = root.findAccessibilityNodeInfosByViewId("com.spotify.music:id/compose_view");
+                    if (composeViews != null && !composeViews.isEmpty()) {
+                        composeViews.get(0).performAction(AccessibilityNodeInfo.ACTION_CLICK);
+                        for (AccessibilityNodeInfo n : composeViews) n.recycle();
+                    }
+                }
+                root.recycle();
+
+                try { Thread.sleep(1200); } catch (InterruptedException ignored) {}
+
+                AccessibilityNodeInfo fresh = service.getRootInActiveWindow();
+                if (fresh != null) {
+                    AccessibilityNodeInfo freshInput = findActiveSearchNode(fresh);
+                    if (freshInput != null && isEditableInput(freshInput)) {
+                        fresh.recycle();
+                        return freshInput;
+                    }
+                    if (freshInput != null) {
+                        fresh.recycle();
+                        return freshInput;
+                    }
+                    fresh.recycle();
                 }
             }
             try { Thread.sleep(POLL_INTERVAL_MS); } catch (InterruptedException ignored) {}
@@ -946,13 +960,31 @@ public class SpotifyPlayFromArtistExecutor {
         if (cls != null && cls.toString().contains("EditText")) return true;
         if (node.isEditable()) return true;
         String res = node.getViewIdResourceName();
-        if (res != null && (res.contains("query") || res.contains("search_edit_text") || res.contains("search_text_input"))) return true;
+        if (res != null && (res.contains("query") || res.contains("search_edit_text") || res.contains("search_text_input") || res.contains("filter_compose"))) return true;
         return false;
     }
 
     private static AccessibilityNodeInfo findActiveSearchNode(AccessibilityNodeInfo root) {
         if (root == null) return null;
 
+        // 1. Check filter_compose container (Jetpack Compose search header)
+        List<AccessibilityNodeInfo> filterContainers = root.findAccessibilityNodeInfosByViewId("com.spotify.music:id/filter_compose");
+        if (filterContainers != null && !filterContainers.isEmpty()) {
+            for (AccessibilityNodeInfo container : filterContainers) {
+                AccessibilityNodeInfo editInFilter = findFirstEditText(container);
+                if (editInFilter != null) {
+                    for (AccessibilityNodeInfo c : filterContainers) c.recycle();
+                    return editInFilter;
+                }
+                container.recycle();
+            }
+        }
+
+        // 2. Direct EditText search across entire tree
+        AccessibilityNodeInfo editText = findFirstEditText(root);
+        if (editText != null) return editText;
+
+        // 3. Known candidate view IDs
         String[] candidateIds = {
                 "com.spotify.music:id/query",
                 "com.spotify.music:id/search_edit_text",
@@ -972,11 +1004,7 @@ public class SpotifyPlayFromArtistExecutor {
             }
         }
 
-        // Check for any EditText
-        AccessibilityNodeInfo editText = findFirstEditText(root);
-        if (editText != null) return editText;
-
-        // Fallback text/desc search
+        // 4. Fallback text/desc search
         String[] candidateTexts = {"What do you want to listen to?", "Search", "search", "Artists, songs, or podcasts"};
         for (String t : candidateTexts) {
             List<AccessibilityNodeInfo> nodes = root.findAccessibilityNodeInfosByText(t);
@@ -988,6 +1016,23 @@ public class SpotifyPlayFromArtistExecutor {
         }
 
         return null;
+    }
+
+    private static AccessibilityNodeInfo findSearchTabNode(AccessibilityNodeInfo root) {
+        if (root == null) return null;
+        String[] ids = {
+                "com.spotify.music:id/search_tab",
+                "com.spotify.music:id/bottom_navigation_search"
+        };
+        for (String id : ids) {
+            List<AccessibilityNodeInfo> nodes = root.findAccessibilityNodeInfosByViewId(id);
+            if (nodes != null && !nodes.isEmpty()) {
+                AccessibilityNodeInfo found = nodes.get(0);
+                for (int i = 1; i < nodes.size(); i++) nodes.get(i).recycle();
+                return found;
+            }
+        }
+        return findNodeByDfs(root, "search, tab", "search");
     }
 
     private static AccessibilityNodeInfo findFirstEditText(AccessibilityNodeInfo node) {
