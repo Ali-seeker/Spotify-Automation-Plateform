@@ -12,6 +12,8 @@ export default function TasksPage({ onNavigateToBuilder }) {
 
   // Per-task execution tracking state
   // taskId -> { runId, status: 'QUEUED'|'RUNNING'|'SUCCESS'|'FAILED', steps: [], error: string }
+  const [taskExecutions, setTaskExecutions] = useState({});
+
   const handleDeviceEvent = (eventData) => {
     if (!eventData || eventData.type !== 'DEVICE_EVENT') return;
     const { run_id, event_type, payload } = eventData;
