@@ -241,7 +241,7 @@ public class SpotifySearchExecutor {
 
     static AccessibilityNodeInfo locateAndActivateSearchInput(SpotifyAccessibilityService service) {
         long start = System.currentTimeMillis();
-        long timeoutMs = 10000;
+        long timeoutMs = 12000;
 
         while (System.currentTimeMillis() - start < timeoutMs) {
             AccessibilityNodeInfo root = service.getRootInActiveWindow();
@@ -252,12 +252,24 @@ public class SpotifySearchExecutor {
                     root.recycle();
                     return activeInput;
                 }
+
+                // 2. Try node-based click on "What do you want to listen to?" or search tab
+                AccessibilityNodeInfo searchBoxTextNode = findNodeByDfs(root, "what do you want to listen to", "artists, songs");
+                if (searchBoxTextNode != null) {
+                    performClickOnNodeOrAncestor(searchBoxTextNode);
+                    searchBoxTextNode.recycle();
+                } else {
+                    AccessibilityNodeInfo searchTab = findSearchTabNode(root);
+                    if (searchTab != null) {
+                        performClickOnNodeOrAncestor(searchTab);
+                        searchTab.recycle();
+                    }
+                }
                 root.recycle();
 
-                // 2. On Search Landing (ComposeView):
-                // Dispatch direct physical touch gesture on top search bar (center X, ~8% Y)
-                Log.i(TAG, "Dispatching tap gesture to activate Compose search bar at top (0.50, 0.08)...");
-                service.clickCoordinatesRatio(0.50f, 0.08f);
+                // 3. Dispatch physical touch gesture on the white search box (Center X: 50%, Y: 17%)
+                Log.i(TAG, "Dispatching tap gesture on white search box at (0.50, 0.17)...");
+                service.clickCoordinatesRatio(0.50f, 0.17f);
 
                 try { Thread.sleep(1500); } catch (InterruptedException ignored) {}
 
@@ -275,8 +287,8 @@ public class SpotifySearchExecutor {
                     fresh.recycle();
                 }
 
-                // Backup: Tap search tab at bottom to toggle search active
-                service.clickCoordinatesRatio(0.30f, 0.98f);
+                // Backup: Tap search tab at bottom (X: 30%, Y: 95%)
+                service.clickCoordinatesRatio(0.30f, 0.95f);
                 try { Thread.sleep(1200); } catch (InterruptedException ignored) {}
             }
             try { Thread.sleep(POLL_INTERVAL_MS); } catch (InterruptedException ignored) {}
