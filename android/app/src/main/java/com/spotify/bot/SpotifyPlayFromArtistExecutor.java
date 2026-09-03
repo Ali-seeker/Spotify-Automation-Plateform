@@ -486,22 +486,61 @@ public class SpotifyPlayFromArtistExecutor {
         for (SpotifySearchResultParser.ResultItem item : results) {
             if (item.node != null) item.node.recycle();
         }
+
+        if (clicked) {
+            try { Thread.sleep(POST_CLICK_DELAY_MS); } catch (InterruptedException ignored) {}
+            long startWait = System.currentTimeMillis();
+            while (System.currentTimeMillis() - startWait < SCREEN_TRANSITION_TIMEOUT_MS) {
+                AccessibilityNodeInfo fresh = service.getRootInActiveWindow();
+                if (fresh != null) {
+                    SpotifyScreen screen = SpotifyNavigator.detectCurrentScreen(fresh);
+                    if (screen == SpotifyScreen.PLAYLIST_PAGE || isPlaylistPageCustomCheck(fresh, playlistQuery)) {
+                        fresh.recycle();
+                        return true;
+                    }
+                    fresh.recycle();
+                }
+                try { Thread.sleep(POLL_INTERVAL_MS); } catch (InterruptedException ignored) {}
+            }
+        }
         return clicked;
     }
 
     private static boolean triggerPlaylistPlayback(SpotifyAccessibilityService service) {
-        try { Thread.sleep(1000); } catch (InterruptedException ignored) {}
+        try { Thread.sleep(1500); } catch (InterruptedException ignored) {}
         AccessibilityNodeInfo root = service.getRootInActiveWindow();
         if (root == null) return false;
 
+        // 1. Try finding playlist green play button in UI tree
         AccessibilityNodeInfo playBtn = findPlaylistPlayButton(root);
-        root.recycle();
+        if (playBtn != null) {
+            boolean clicked = performClickOnNodeOrAncestor(playBtn);
+            playBtn.recycle();
+            root.recycle();
+            if (clicked) return true;
+        } else {
+            root.recycle();
+        }
 
-        if (playBtn == null) return false;
+        // 2. Gesture tap on green play button on Playlist header (Right side: X: 88%, Y: 56%)
+        Log.i(TAG, "Dispatching tap gesture on Playlist play button (0.88, 0.56)...");
+        boolean tapped = service.clickCoordinatesRatio(0.88f, 0.56f);
+        if (tapped) return true;
 
-        boolean clicked = performClickOnNodeOrAncestor(playBtn);
-        playBtn.recycle();
-        return clicked;
+        // 3. Fallback: Click first track in playlist
+        AccessibilityNodeInfo fresh = service.getRootInActiveWindow();
+        if (fresh != null) {
+            AccessibilityNodeInfo firstTrack = findFirstTrackInList(fresh);
+            if (firstTrack != null) {
+                boolean trackClicked = performClickOnNodeOrAncestor(firstTrack);
+                firstTrack.recycle();
+                fresh.recycle();
+                return trackClicked;
+            }
+            fresh.recycle();
+        }
+
+        return false;
     }
 
     /**
@@ -815,6 +854,25 @@ public class SpotifyPlayFromArtistExecutor {
         }
 
         return findNodeByDfs(root, "play", "shuffle play");
+    }
+
+    private static AccessibilityNodeInfo findFirstTrackInList(AccessibilityNodeInfo root) {
+        if (root == null) return null;
+        String[] trackIds = {
+                "com.spotify.music:id/track_row",
+                "com.spotify.music:id/row_view",
+                "com.spotify.music:id/title",
+                "com.spotify.music:id/track_title"
+        };
+        for (String id : trackIds) {
+            List<AccessibilityNodeInfo> nodes = root.findAccessibilityNodeInfosByViewId(id);
+            if (nodes != null && !nodes.isEmpty()) {
+                AccessibilityNodeInfo found = nodes.get(0);
+                for (int i = 1; i < nodes.size(); i++) nodes.get(i).recycle();
+                return found;
+            }
+        }
+        return null;
     }
 
     private static AccessibilityNodeInfo findArtistRadioNode(AccessibilityNodeInfo root, String artistName) {
