@@ -237,7 +237,7 @@ public class SpotifySearchExecutor {
         }).start();
     }
 
-    private static AccessibilityNodeInfo locateSearchInputField(AccessibilityNodeInfo root) {
+    static AccessibilityNodeInfo locateSearchInputField(AccessibilityNodeInfo root) {
         if (root == null) return null;
 
         String[] candidateIds = {

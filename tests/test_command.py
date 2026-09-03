@@ -168,3 +168,56 @@ def test_per_device_sequential_queuing(auth_headers, test_task_and_device):
         # Receive Command 2 second
         received2 = websocket.receive_json()
         assert received2["command_id"] == cmd2_id
+
+
+def test_send_play_from_artist_command(auth_headers):
+    """Verify /send_command handles spotify.play_from_artist tasks with CATALOG, THIS_IS, and RADIO play_modes."""
+    for mode in ["CATALOG", "THIS_IS", "RADIO"]:
+        # Create Task
+        task_res = client.post(
+            "/tasks",
+            json={
+                "task_name": f"Play_Artist_{mode}_{uuid.uuid4().hex[:6]}",
+                "action_type": "spotify.play_from_artist",
+                "search_query": "Taylor Swift",
+                "action_params": {"play_mode": mode}
+            },
+            headers=auth_headers
+        )
+        assert task_res.status_code == 201
+        task_id = str(task_res.json()["id"])
+
+        # Create Device
+        device_id = f"dev_play_{uuid.uuid4().hex[:6]}"
+        dev_res = client.post(
+            "/devices",
+            json={"device_id": device_id, "status": "IDLE"},
+            headers=auth_headers
+        )
+        assert dev_res.status_code in [200, 201]
+
+        # Connect WebSocket and send command
+        with client.websocket_connect(f"/ws/device/{device_id}") as websocket:
+            websocket.send_json({
+                "type": "DEVICE_HELLO",
+                "device_id": device_id,
+                "device_auth_token": SHARED_SECRET,
+                "app_version": "1.0.0"
+            })
+            ack = websocket.receive_json()
+            assert ack["type"] == "HELLO_ACK"
+
+            res = client.post(
+                "/send_command",
+                json={"task_id": task_id, "device_id": device_id},
+                headers=auth_headers
+            )
+            assert res.status_code == 200
+            data = res.json()
+            assert data["status"] == "QUEUED"
+
+            payload = websocket.receive_json()
+            assert payload["action_type"] == "spotify.play_from_artist"
+            assert payload["search_query"] == "Taylor Swift"
+            assert payload["action_params"]["play_mode"] == mode
+

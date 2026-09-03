@@ -129,7 +129,7 @@ public class CommandQueueManager {
 
                 // 4. EXECUTE COMMAND LIFE-CYCLE
                 executeCommandWithLatch(command, latch);
-                latch.await(35, TimeUnit.SECONDS); // Wait for async UI callbacks
+                latch.await(60, TimeUnit.SECONDS); // Wait for async UI callbacks (with paced human delays)
 
             } catch (Throwable t) {
                 Log.e(TAG, String.format("[%s] UNHANDLED_EXCEPTION during command execution for run_id=%s",
@@ -204,7 +204,19 @@ public class CommandQueueManager {
         String runId = command.optString("run_id", "");
         String actionType = command.optString("action_type", "CLICK");
 
-        if (actionType.equalsIgnoreCase("spotify.search")
+        if (actionType.equalsIgnoreCase("spotify.play_from_artist")
+                || actionType.equalsIgnoreCase("PLAY_FROM_ARTIST")
+                || actionType.equalsIgnoreCase("PLAY_ARTIST")) {
+
+            SpotifyPlayFromArtistExecutor.executePlayFromArtist(context, command, (success, message, reasonCode) -> {
+                if (success) {
+                    emitCommandDone(runId, "SUCCESS", true);
+                } else {
+                    emitCommandDone(runId, "FAILED", false);
+                }
+                latch.countDown();
+            });
+        } else if (actionType.equalsIgnoreCase("spotify.search")
                 || actionType.equalsIgnoreCase("SEARCH")
                 || actionType.equalsIgnoreCase("SEARCH_AND_PLAY")
                 || actionType.equalsIgnoreCase("CLICK_SEARCH")) {
