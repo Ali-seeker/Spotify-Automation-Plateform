@@ -1144,6 +1144,18 @@ public class SpotifyPlayFromArtistExecutor {
         if (clickable == null) clickable = node;
 
         boolean clicked = clickable.performAction(AccessibilityNodeInfo.ACTION_CLICK);
+
+        // Dispatch physical tap gesture on exact node bounds to ensure touch registration
+        SpotifyAccessibilityService service = SpotifyAccessibilityService.getInstance();
+        if (service != null) {
+            android.graphics.Rect rect = new android.graphics.Rect();
+            node.getBoundsInScreen(rect);
+            if (!rect.isEmpty() && rect.width() > 0 && rect.height() > 0) {
+                service.clickCoordinates(rect.centerX(), rect.centerY());
+                clicked = true;
+            }
+        }
+
         if (clickable != node) clickable.recycle();
 
         return clicked;
