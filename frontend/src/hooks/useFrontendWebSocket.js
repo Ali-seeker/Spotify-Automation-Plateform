@@ -3,12 +3,17 @@ import { useState, useEffect, useRef } from 'react';
 /**
  * Custom React Hook to connect to WS /ws/frontend for dynamic device status and task progress updates.
  */
-export function useFrontendWebSocket() {
+export function useFrontendWebSocket(onEventCallback) {
   const [isConnected, setIsConnected] = useState(false);
   const [deviceUpdates, setDeviceUpdates] = useState({});
   const [recentEvents, setRecentEvents] = useState([]);
   const [lastEvent, setLastEvent] = useState(null);
   const socketRef = useRef(null);
+  const callbackRef = useRef(onEventCallback);
+
+  useEffect(() => {
+    callbackRef.current = onEventCallback;
+  }, [onEventCallback]);
 
   useEffect(() => {
     const apiBase = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000';
@@ -38,6 +43,9 @@ export function useFrontendWebSocket() {
           } else if (data.type === 'DEVICE_EVENT') {
             setLastEvent(data);
             setRecentEvents((prev) => [data, ...prev.slice(0, 49)]);
+            if (callbackRef.current) {
+              callbackRef.current(data);
+            }
           }
         } catch (e) {
           console.error('Error parsing WebSocket event:', e);
