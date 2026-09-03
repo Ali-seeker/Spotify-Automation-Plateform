@@ -23,7 +23,21 @@ public class SpotifyAccessibilityService extends AccessibilityService {
     }
 
     public static boolean isSpotifyForeground() {
-        return SPOTIFY_PACKAGE.equals(currentForegroundPackage);
+        if (SPOTIFY_PACKAGE.equals(currentForegroundPackage)) {
+            return true;
+        }
+        if (instance != null) {
+            android.view.accessibility.AccessibilityNodeInfo root = instance.getRootInActiveWindow();
+            if (root != null) {
+                CharSequence pkg = root.getPackageName();
+                root.recycle();
+                if (pkg != null && SPOTIFY_PACKAGE.contentEquals(pkg)) {
+                    currentForegroundPackage = SPOTIFY_PACKAGE;
+                    return true;
+                }
+            }
+        }
+        return false;
     }
 
     @Override
@@ -55,7 +69,9 @@ public class SpotifyAccessibilityService extends AccessibilityService {
             String packageName = pkgNameChar.toString();
             int eventType = event.getEventType();
 
-            if (eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) {
+            if (SPOTIFY_PACKAGE.equals(packageName)) {
+                currentForegroundPackage = SPOTIFY_PACKAGE;
+            } else if (eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) {
                 currentForegroundPackage = packageName;
             }
 
