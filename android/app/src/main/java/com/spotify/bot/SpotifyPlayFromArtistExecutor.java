@@ -130,13 +130,11 @@ public class SpotifyPlayFromArtistExecutor {
                 return;
             }
 
-            // Locate Search Field
-            AccessibilityNodeInfo root = service.getRootInActiveWindow();
-            AccessibilityNodeInfo searchInputNode = SpotifySearchExecutor.locateSearchInputField(root);
-            if (root != null) root.recycle();
+            // Locate & Activate Search Field with Bounded Polling
+            AccessibilityNodeInfo searchInputNode = locateAndActivateSearchInput(service);
 
             if (searchInputNode == null) {
-                Log.e(TAG, "Search input field not found in UI tree.");
+                Log.e(TAG, "Search input field not found in UI tree after polling.");
                 emitStepFailed(context, runId, 1, "SEARCH_FIELD_NOT_FOUND", null);
                 if (callback != null) callback.onResult(false, "Search field not found.", "SEARCH_FIELD_NOT_FOUND");
                 return;
@@ -157,14 +155,16 @@ public class SpotifyPlayFromArtistExecutor {
 
             try { Thread.sleep(1500); } catch (InterruptedException ignored) {}
 
-            // Submit Search
+            // Submit Search / Focus Results
             AccessibilityNodeInfo freshRoot = service.getRootInActiveWindow();
-            AccessibilityNodeInfo submitNode = SpotifySearchExecutor.locateSearchInputField(freshRoot);
-            if (submitNode != null) {
-                submitNode.performAction(AccessibilityNodeInfo.ACTION_CLICK);
-                submitNode.recycle();
+            if (freshRoot != null) {
+                AccessibilityNodeInfo submitNode = findActiveSearchNode(freshRoot);
+                if (submitNode != null) {
+                    submitNode.performAction(AccessibilityNodeInfo.ACTION_CLICK);
+                    submitNode.recycle();
+                }
+                freshRoot.recycle();
             }
-            if (freshRoot != null) freshRoot.recycle();
 
             // Wait for Search Results
             long startWait = System.currentTimeMillis();
@@ -897,6 +897,112 @@ public class SpotifyPlayFromArtistExecutor {
                     return result;
                 }
                 child.recycle();
+            }
+        }
+        return null;
+    }
+
+    private static AccessibilityNodeInfo locateAndActivateSearchInput(SpotifyAccessibilityService service) {
+        long start = System.currentTimeMillis();
+        long timeoutMs = 5000;
+
+        while (System.currentTimeMillis() - start < timeoutMs) {
+            AccessibilityNodeInfo root = service.getRootInActiveWindow();
+            if (root != null) {
+                // 1. Direct search for editable search input
+                AccessibilityNodeInfo activeInput = findActiveSearchNode(root);
+                if (activeInput != null) {
+                    if (isEditableInput(activeInput)) {
+                        root.recycle();
+                        return activeInput;
+                    }
+
+                    // If it's a search placeholder button (e.g. "What do you want to listen to?"), click it
+                    boolean clicked = performClickOnNodeOrAncestor(activeInput);
+                    activeInput.recycle();
+                    root.recycle();
+
+                    if (clicked) {
+                        try { Thread.sleep(1000); } catch (InterruptedException ignored) {}
+                        AccessibilityNodeInfo fresh = service.getRootInActiveWindow();
+                        if (fresh != null) {
+                            AccessibilityNodeInfo freshInput = findActiveSearchNode(fresh);
+                            fresh.recycle();
+                            if (freshInput != null) return freshInput;
+                        }
+                    }
+                } else {
+                    root.recycle();
+                }
+            }
+            try { Thread.sleep(POLL_INTERVAL_MS); } catch (InterruptedException ignored) {}
+        }
+        return null;
+    }
+
+    private static boolean isEditableInput(AccessibilityNodeInfo node) {
+        if (node == null) return false;
+        CharSequence cls = node.getClassName();
+        if (cls != null && cls.toString().contains("EditText")) return true;
+        if (node.isEditable()) return true;
+        String res = node.getViewIdResourceName();
+        if (res != null && (res.contains("query") || res.contains("search_edit_text") || res.contains("search_text_input"))) return true;
+        return false;
+    }
+
+    private static AccessibilityNodeInfo findActiveSearchNode(AccessibilityNodeInfo root) {
+        if (root == null) return null;
+
+        String[] candidateIds = {
+                "com.spotify.music:id/query",
+                "com.spotify.music:id/search_edit_text",
+                "com.spotify.music:id/search_text_input",
+                "com.spotify.music:id/find_search_field",
+                "com.spotify.music:id/search_view",
+                "com.spotify.music:id/search_field",
+                "com.spotify.music:id/search_box"
+        };
+
+        for (String id : candidateIds) {
+            List<AccessibilityNodeInfo> nodes = root.findAccessibilityNodeInfosByViewId(id);
+            if (nodes != null && !nodes.isEmpty()) {
+                AccessibilityNodeInfo found = nodes.get(0);
+                for (int i = 1; i < nodes.size(); i++) nodes.get(i).recycle();
+                return found;
+            }
+        }
+
+        // Check for any EditText
+        AccessibilityNodeInfo editText = findFirstEditText(root);
+        if (editText != null) return editText;
+
+        // Fallback text/desc search
+        String[] candidateTexts = {"What do you want to listen to?", "Search", "search", "Artists, songs, or podcasts"};
+        for (String t : candidateTexts) {
+            List<AccessibilityNodeInfo> nodes = root.findAccessibilityNodeInfosByText(t);
+            if (nodes != null && !nodes.isEmpty()) {
+                AccessibilityNodeInfo found = nodes.get(0);
+                for (int i = 1; i < nodes.size(); i++) nodes.get(i).recycle();
+                return found;
+            }
+        }
+
+        return null;
+    }
+
+    private static AccessibilityNodeInfo findFirstEditText(AccessibilityNodeInfo node) {
+        if (node == null) return null;
+        CharSequence cls = node.getClassName();
+        if (cls != null && cls.toString().contains("EditText")) {
+            return AccessibilityNodeInfo.obtain(node);
+        }
+        int count = node.getChildCount();
+        for (int i = 0; i < count; i++) {
+            AccessibilityNodeInfo child = node.getChild(i);
+            if (child != null) {
+                AccessibilityNodeInfo found = findFirstEditText(child);
+                child.recycle();
+                if (found != null) return found;
             }
         }
         return null;

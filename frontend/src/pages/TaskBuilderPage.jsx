@@ -4,8 +4,9 @@ import { createTaskApi } from '../services/apiService';
 
 export default function TaskBuilderPage({ onSaveTaskSuccess, onLaunchTask }) {
   const [taskName, setTaskName] = useState('');
-  const [actionType, setActionType] = useState('SEARCH_AND_PLAY');
-  const [searchQuery, setSearchQuery] = useState('');
+  const [actionType, setActionType] = useState('spotify.play_from_artist');
+  const [searchQuery, setSearchQuery] = useState('Taylor Swift');
+  const [playMode, setPlayMode] = useState('CATALOG');
   const [playDuration, setPlayDuration] = useState('60');
   const [likeProbability, setLikeProbability] = useState('0.8');
   const [skipProbability, setSkipProbability] = useState('0.2');
@@ -15,7 +16,7 @@ export default function TaskBuilderPage({ onSaveTaskSuccess, onLaunchTask }) {
   const [serverError, setServerError] = useState('');
   const [successMsg, setSuccessMsg] = useState('');
 
-  const isSearchRequired = ['SEARCH_AND_PLAY', 'FOLLOW_ARTIST', 'SAVE_TRACK'].includes(actionType);
+  const isSearchRequired = ['SEARCH_AND_PLAY', 'FOLLOW_ARTIST', 'SAVE_TRACK', 'spotify.search', 'spotify.play_from_artist'].includes(actionType);
 
   const validateForm = () => {
     const errs = {};
@@ -26,7 +27,7 @@ export default function TaskBuilderPage({ onSaveTaskSuccess, onLaunchTask }) {
       errs.actionType = 'Action Type is required';
     }
     if (isSearchRequired && !searchQuery.trim()) {
-      errs.searchQuery = `Target Search Query is required for ${actionType} action type`;
+      errs.searchQuery = actionType === 'spotify.play_from_artist' ? 'Artist Name is required' : `Target Search Query is required for ${actionType} action type`;
     }
     
     // Validate probabilities if entered
@@ -45,10 +46,13 @@ export default function TaskBuilderPage({ onSaveTaskSuccess, onLaunchTask }) {
   };
 
   const jsonPreview = {
-    task_name: taskName || 'Unnamed Task',
+    task_name: taskName || 'Play Artist Task',
     action_type: actionType,
     search_query: searchQuery || null,
-    action_params: {
+    action_params: actionType === 'spotify.play_from_artist' ? {
+      play_mode: playMode,
+      artist_name: searchQuery || undefined
+    } : {
       play_duration: playDuration ? Number(playDuration) : 60,
       like_probability: likeProbability ? Number(likeProbability) : 0.8,
       skip_probability: skipProbability ? Number(skipProbability) : 0.2
@@ -70,7 +74,10 @@ export default function TaskBuilderPage({ onSaveTaskSuccess, onLaunchTask }) {
       task_name: taskName.trim(),
       action_type: actionType,
       search_query: searchQuery.trim() || null,
-      action_params: {
+      action_params: actionType === 'spotify.play_from_artist' ? {
+        play_mode: playMode,
+        artist_name: searchQuery.trim()
+      } : {
         play_duration: playDuration ? Number(playDuration) : 60,
         like_probability: likeProbability ? Number(likeProbability) : 0.8,
         skip_probability: skipProbability ? Number(skipProbability) : 0.2
@@ -206,6 +213,8 @@ export default function TaskBuilderPage({ onSaveTaskSuccess, onLaunchTask }) {
                   outline: 'none'
                 }}
               >
+                <option value="spotify.play_from_artist">spotify.play_from_artist — Play From Artist (Phase 4.3)</option>
+                <option value="spotify.search">spotify.search — Search Query & Match</option>
                 <option value="SEARCH_AND_PLAY">SEARCH_AND_PLAY — Search & Play Target</option>
                 <option value="LIKE_CURRENT_TRACK">LIKE_CURRENT_TRACK — Like Playing Track</option>
                 <option value="FOLLOW_ARTIST">FOLLOW_ARTIST — Follow Target Artist</option>
@@ -219,10 +228,10 @@ export default function TaskBuilderPage({ onSaveTaskSuccess, onLaunchTask }) {
               )}
             </div>
 
-            {/* Search Query */}
+            {/* Target Query / Artist Name */}
             <div style={{ marginBottom: '1.25rem' }}>
               <label style={{ display: 'block', fontSize: '0.78rem', fontWeight: 600, color: '#d1d5db', marginBottom: '0.4rem' }}>
-                Target Search Query {isSearchRequired ? <span style={{ color: '#ef4444' }}>*</span> : '(Optional)'}
+                {actionType === 'spotify.play_from_artist' ? 'Artist Name' : 'Target Search Query'} {isSearchRequired ? <span style={{ color: '#ef4444' }}>*</span> : '(Optional)'}
               </label>
               <input
                 type="text"
@@ -231,7 +240,7 @@ export default function TaskBuilderPage({ onSaveTaskSuccess, onLaunchTask }) {
                   setSearchQuery(e.target.value);
                   if (errors.searchQuery) setErrors({ ...errors, searchQuery: null });
                 }}
-                placeholder="e.g. Atif Aslam - Tu Jaane Na"
+                placeholder={actionType === 'spotify.play_from_artist' ? 'e.g. Taylor Swift or The Weeknd' : 'e.g. Atif Aslam - Tu Jaane Na'}
                 style={{
                   width: '100%',
                   backgroundColor: 'rgba(0, 0, 0, 0.4)',
@@ -250,7 +259,36 @@ export default function TaskBuilderPage({ onSaveTaskSuccess, onLaunchTask }) {
               )}
             </div>
 
+            {/* Play Mode Selector for spotify.play_from_artist */}
+            {actionType === 'spotify.play_from_artist' && (
+              <div style={{ marginBottom: '1.25rem' }}>
+                <label style={{ display: 'block', fontSize: '0.78rem', fontWeight: 600, color: '#d1d5db', marginBottom: '0.4rem' }}>
+                  Play Mode (Action Parameter) <span style={{ color: '#ef4444' }}>*</span>
+                </label>
+                <select
+                  value={playMode}
+                  onChange={(e) => setPlayMode(e.target.value)}
+                  style={{
+                    width: '100%',
+                    backgroundColor: 'rgba(0, 0, 0, 0.4)',
+                    border: '1px solid rgba(29, 185, 84, 0.4)',
+                    borderRadius: '8px',
+                    padding: '0.75rem',
+                    color: '#10b981',
+                    fontSize: '0.88rem',
+                    fontWeight: 600,
+                    outline: 'none'
+                  }}
+                >
+                  <option value="CATALOG">CATALOG — Shuffle Play Artist Catalog</option>
+                  <option value="THIS_IS">THIS_IS — Play "This Is [Artist]" Playlist</option>
+                  <option value="RADIO">RADIO — Play Artist Radio Station</option>
+                </select>
+              </div>
+            )}
+
             {/* Action Parameters Grid */}
+            {actionType !== 'spotify.play_from_artist' && (
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '0.75rem', marginBottom: '1.5rem' }}>
               <div>
                 <label style={{ display: 'block', fontSize: '0.72rem', fontWeight: 600, color: '#d1d5db', marginBottom: '0.3rem' }}>
@@ -341,6 +379,7 @@ export default function TaskBuilderPage({ onSaveTaskSuccess, onLaunchTask }) {
                 )}
               </div>
             </div>
+            )}
 
             <div style={{ display: 'flex', gap: '0.75rem' }}>
               <button
