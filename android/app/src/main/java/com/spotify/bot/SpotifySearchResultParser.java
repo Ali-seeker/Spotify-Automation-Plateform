@@ -63,18 +63,27 @@ public class SpotifySearchResultParser {
 
         // Check if node is clickable row or result item container
         if (node.isClickable() && (!desc.isEmpty() || !text.isEmpty() || node.getChildCount() > 0)) {
-            // Exclude bottom navigation bar items and top search field
             String descLower = desc.toLowerCase(Locale.ROOT);
-            if (!descLower.contains("tab") && !resourceId.contains("find_search_field") && !resourceId.contains("query")) {
-                List<String> childTexts = new ArrayList<>();
-                extractTexts(node, childTexts);
-                String title = !text.isEmpty() ? text : (!childTexts.isEmpty() ? childTexts.get(0) : desc);
-                String subtitle = childTexts.size() > 1 ? childTexts.get(1) : "";
-                if (title.isEmpty() && !desc.isEmpty()) {
-                    title = desc;
+            if (!descLower.contains("tab") && !resourceId.contains("find_search_field") && !resourceId.contains("filter_compose")) {
+                // Check if this is a search suggestion row (has tap_ahead_button or query child with no subtitle/artwork)
+                boolean isSuggestion = hasChildWithId(node, "com.spotify.music:id/tap_ahead_button")
+                        || (hasChildWithId(node, "com.spotify.music:id/query") && !hasChildWithId(node, "com.spotify.music:id/artwork") && !hasChildWithId(node, "com.spotify.music:id/subtitle"));
+
+                String title = getChildTextById(node, "com.spotify.music:id/title");
+                String subtitle = getChildTextById(node, "com.spotify.music:id/subtitle");
+
+                if (title.isEmpty()) {
+                    List<String> childTexts = new ArrayList<>();
+                    extractTexts(node, childTexts);
+                    title = !text.isEmpty() ? text : (!childTexts.isEmpty() ? childTexts.get(0) : desc);
+                    if (subtitle.isEmpty() && childTexts.size() > 1) {
+                        subtitle = childTexts.get(1);
+                    }
                 }
+
                 if (!title.isEmpty()) {
-                    results.add(new ResultItem(title, subtitle, desc, resourceId, AccessibilityNodeInfo.obtain(node)));
+                    String itemType = isSuggestion ? "SUGGESTION" : ResultItem.determineItemType(subtitle, desc);
+                    results.add(new ResultItem(title, subtitle, desc, resourceId, itemType, AccessibilityNodeInfo.obtain(node)));
                 }
             }
         }
@@ -87,6 +96,29 @@ public class SpotifySearchResultParser {
                 child.recycle();
             }
         }
+    }
+
+    private static boolean hasChildWithId(AccessibilityNodeInfo node, String viewId) {
+        if (node == null) return false;
+        List<AccessibilityNodeInfo> nodes = node.findAccessibilityNodeInfosByViewId(viewId);
+        if (nodes != null && !nodes.isEmpty()) {
+            for (AccessibilityNodeInfo n : nodes) n.recycle();
+            return true;
+        }
+        return false;
+    }
+
+    private static String getChildTextById(AccessibilityNodeInfo node, String viewId) {
+        if (node == null) return "";
+        List<AccessibilityNodeInfo> nodes = node.findAccessibilityNodeInfosByViewId(viewId);
+        if (nodes != null && !nodes.isEmpty()) {
+            AccessibilityNodeInfo n = nodes.get(0);
+            CharSequence t = n.getText();
+            String result = t != null ? t.toString().trim() : "";
+            for (AccessibilityNodeInfo item : nodes) item.recycle();
+            return result;
+        }
+        return "";
     }
 
     private static void extractTexts(AccessibilityNodeInfo node, List<String> list) {

@@ -470,17 +470,32 @@ public class SpotifyPlayFromArtistExecutor {
         if (results.isEmpty()) return false;
 
         SpotifySearchResultParser.ResultItem bestPlaylist = null;
+        // First pass: Prioritize PLAYLIST items
         for (SpotifySearchResultParser.ResultItem item : results) {
-            SpotifyFuzzyMatcher.MatchResult match = SpotifyFuzzyMatcher.evaluateMatch(playlistQuery, item.title);
-            if (match.isMatched || item.title.toLowerCase(Locale.ROOT).contains(playlistQuery.toLowerCase(Locale.ROOT))
-                    || playlistQuery.toLowerCase(Locale.ROOT).contains(item.title.toLowerCase(Locale.ROOT))) {
+            if ("SUGGESTION".equals(item.itemType)) continue;
+            if ("PLAYLIST".equals(item.itemType) && (item.title.toLowerCase(Locale.ROOT).contains(playlistQuery.toLowerCase(Locale.ROOT))
+                    || playlistQuery.toLowerCase(Locale.ROOT).contains(item.title.toLowerCase(Locale.ROOT))
+                    || SpotifyFuzzyMatcher.evaluateMatch(playlistQuery, item.title).isMatched)) {
                 bestPlaylist = item;
                 break;
+            }
+        }
+        // Fallback pass: Any non-suggestion match
+        if (bestPlaylist == null) {
+            for (SpotifySearchResultParser.ResultItem item : results) {
+                if ("SUGGESTION".equals(item.itemType)) continue;
+                SpotifyFuzzyMatcher.MatchResult match = SpotifyFuzzyMatcher.evaluateMatch(playlistQuery, item.title);
+                if (match.isMatched || item.title.toLowerCase(Locale.ROOT).contains(playlistQuery.toLowerCase(Locale.ROOT))
+                        || playlistQuery.toLowerCase(Locale.ROOT).contains(item.title.toLowerCase(Locale.ROOT))) {
+                    bestPlaylist = item;
+                    break;
+                }
             }
         }
 
         boolean clicked = false;
         if (bestPlaylist != null && bestPlaylist.node != null) {
+            Log.i(TAG, String.format("Clicking playlist result item: '%s' [%s]", bestPlaylist.title, bestPlaylist.itemType));
             clicked = performClickOnNodeOrAncestor(bestPlaylist.node);
         }
         for (SpotifySearchResultParser.ResultItem item : results) {
@@ -503,7 +518,7 @@ public class SpotifyPlayFromArtistExecutor {
                 try { Thread.sleep(POLL_INTERVAL_MS); } catch (InterruptedException ignored) {}
             }
         }
-        return clicked;
+        return false;
     }
 
     private static boolean triggerPlaylistPlayback(SpotifyAccessibilityService service) {
@@ -750,6 +765,9 @@ public class SpotifyPlayFromArtistExecutor {
         double bestScore = -1.0;
 
         for (SpotifySearchResultParser.ResultItem item : items) {
+            if ("SUGGESTION".equalsIgnoreCase(item.itemType)) {
+                continue;
+            }
             double baseSimilarity = SpotifyFuzzyMatcher.computeSimilarity(expectedArtist, item.title);
             double totalScore = baseSimilarity;
 
