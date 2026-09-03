@@ -253,7 +253,7 @@ public class SpotifySearchExecutor {
                     return activeInput;
                 }
 
-                // 2. Try node-based click on "What do you want to listen to?" or search tab
+                // 2. Pure Accessibility Node Click on "What do you want to listen to?" placeholder or search tab
                 AccessibilityNodeInfo searchBoxTextNode = findNodeByDfs(root, "what do you want to listen to", "artists, songs");
                 if (searchBoxTextNode != null) {
                     performClickOnNodeOrAncestor(searchBoxTextNode);
@@ -263,15 +263,17 @@ public class SpotifySearchExecutor {
                     if (searchTab != null) {
                         performClickOnNodeOrAncestor(searchTab);
                         searchTab.recycle();
+                    } else {
+                        List<AccessibilityNodeInfo> composeViews = root.findAccessibilityNodeInfosByViewId("com.spotify.music:id/compose_view");
+                        if (composeViews != null && !composeViews.isEmpty()) {
+                            performClickOnNodeOrAncestor(composeViews.get(0));
+                            for (AccessibilityNodeInfo n : composeViews) n.recycle();
+                        }
                     }
                 }
                 root.recycle();
 
-                // 3. Dispatch physical touch gesture on the white search box (Center X: 50%, Y: 17%)
-                Log.i(TAG, "Dispatching tap gesture on white search box at (0.50, 0.17)...");
-                service.clickCoordinatesRatio(0.50f, 0.17f);
-
-                try { Thread.sleep(1500); } catch (InterruptedException ignored) {}
+                try { Thread.sleep(1200); } catch (InterruptedException ignored) {}
 
                 AccessibilityNodeInfo fresh = service.getRootInActiveWindow();
                 if (fresh != null) {
@@ -286,10 +288,6 @@ public class SpotifySearchExecutor {
                     }
                     fresh.recycle();
                 }
-
-                // Backup: Tap search tab at bottom (X: 30%, Y: 95%)
-                service.clickCoordinatesRatio(0.30f, 0.95f);
-                try { Thread.sleep(1200); } catch (InterruptedException ignored) {}
             }
             try { Thread.sleep(POLL_INTERVAL_MS); } catch (InterruptedException ignored) {}
         }
@@ -420,17 +418,39 @@ public class SpotifySearchExecutor {
 
     private static boolean performClickOnNodeOrAncestor(AccessibilityNodeInfo node) {
         if (node == null) return false;
-        AccessibilityNodeInfo clickable = node;
-        while (clickable != null && !clickable.isClickable()) {
-            AccessibilityNodeInfo parent = clickable.getParent();
-            if (parent == null) break;
-            if (clickable != node) clickable.recycle();
-            clickable = parent;
+
+        // 1. Direct click on node if clickable
+        if (node.isClickable() && node.performAction(AccessibilityNodeInfo.ACTION_CLICK)) {
+            return true;
         }
-        if (clickable == null) clickable = node;
-        boolean clicked = clickable.performAction(AccessibilityNodeInfo.ACTION_CLICK);
-        if (clickable != node) clickable.recycle();
-        return clicked;
+
+        // 2. Traverse up parent hierarchy (up to 6 levels)
+        AccessibilityNodeInfo current = node.getParent();
+        for (int i = 0; i < 6 && current != null; i++) {
+            if (current.isClickable() && current.performAction(AccessibilityNodeInfo.ACTION_CLICK)) {
+                current.recycle();
+                return true;
+            }
+            AccessibilityNodeInfo next = current.getParent();
+            current.recycle();
+            current = next;
+        }
+
+        // 3. Traverse down children (1-level)
+        int childCount = node.getChildCount();
+        for (int i = 0; i < childCount; i++) {
+            AccessibilityNodeInfo child = node.getChild(i);
+            if (child != null) {
+                if (child.isClickable() && child.performAction(AccessibilityNodeInfo.ACTION_CLICK)) {
+                    child.recycle();
+                    return true;
+                }
+                child.recycle();
+            }
+        }
+
+        // 4. Default attempt on original node
+        return node.performAction(AccessibilityNodeInfo.ACTION_CLICK);
     }
 
     private static boolean applyResultFilter(SpotifyAccessibilityService service, String filterName) {

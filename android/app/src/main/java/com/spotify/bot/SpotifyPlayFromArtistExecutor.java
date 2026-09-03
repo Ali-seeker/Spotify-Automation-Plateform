@@ -511,35 +511,25 @@ public class SpotifyPlayFromArtistExecutor {
         AccessibilityNodeInfo root = service.getRootInActiveWindow();
         if (root == null) return false;
 
-        // 1. Try finding playlist green play button in UI tree
+        // 1. Try finding playlist play/shuffle button in Accessibility tree
         AccessibilityNodeInfo playBtn = findPlaylistPlayButton(root);
         if (playBtn != null) {
             boolean clicked = performClickOnNodeOrAncestor(playBtn);
             playBtn.recycle();
             root.recycle();
             if (clicked) return true;
-        } else {
+        }
+
+        // 2. Fallback: Click first track in playlist
+        AccessibilityNodeInfo firstTrack = findFirstTrackInList(root);
+        if (firstTrack != null) {
+            boolean trackClicked = performClickOnNodeOrAncestor(firstTrack);
+            firstTrack.recycle();
             root.recycle();
+            return trackClicked;
         }
 
-        // 2. Gesture tap on green play button on Playlist header (Right side: X: 88%, Y: 56%)
-        Log.i(TAG, "Dispatching tap gesture on Playlist play button (0.88, 0.56)...");
-        boolean tapped = service.clickCoordinatesRatio(0.88f, 0.56f);
-        if (tapped) return true;
-
-        // 3. Fallback: Click first track in playlist
-        AccessibilityNodeInfo fresh = service.getRootInActiveWindow();
-        if (fresh != null) {
-            AccessibilityNodeInfo firstTrack = findFirstTrackInList(fresh);
-            if (firstTrack != null) {
-                boolean trackClicked = performClickOnNodeOrAncestor(firstTrack);
-                firstTrack.recycle();
-                fresh.recycle();
-                return trackClicked;
-            }
-            fresh.recycle();
-        }
-
+        root.recycle();
         return false;
     }
 
@@ -988,7 +978,7 @@ public class SpotifyPlayFromArtistExecutor {
                     return activeInput;
                 }
 
-                // 2. Try node-based click on "What do you want to listen to?" or search tab
+                // 2. Pure Accessibility Node Click on "What do you want to listen to?" placeholder or search tab
                 AccessibilityNodeInfo searchBoxTextNode = findNodeByDfs(root, "what do you want to listen to", "artists, songs");
                 if (searchBoxTextNode != null) {
                     performClickOnNodeOrAncestor(searchBoxTextNode);
@@ -998,15 +988,17 @@ public class SpotifyPlayFromArtistExecutor {
                     if (searchTab != null) {
                         performClickOnNodeOrAncestor(searchTab);
                         searchTab.recycle();
+                    } else {
+                        List<AccessibilityNodeInfo> composeViews = root.findAccessibilityNodeInfosByViewId("com.spotify.music:id/compose_view");
+                        if (composeViews != null && !composeViews.isEmpty()) {
+                            performClickOnNodeOrAncestor(composeViews.get(0));
+                            for (AccessibilityNodeInfo n : composeViews) n.recycle();
+                        }
                     }
                 }
                 root.recycle();
 
-                // 3. Dispatch physical touch gesture on the white search box (Center X: 50%, Y: 17%)
-                Log.i(TAG, "Dispatching tap gesture on white search box at (0.50, 0.17)...");
-                service.clickCoordinatesRatio(0.50f, 0.17f);
-
-                try { Thread.sleep(1500); } catch (InterruptedException ignored) {}
+                try { Thread.sleep(1200); } catch (InterruptedException ignored) {}
 
                 AccessibilityNodeInfo fresh = service.getRootInActiveWindow();
                 if (fresh != null) {
@@ -1021,10 +1013,6 @@ public class SpotifyPlayFromArtistExecutor {
                     }
                     fresh.recycle();
                 }
-
-                // Backup: Tap search tab at bottom (X: 30%, Y: 95%)
-                service.clickCoordinatesRatio(0.30f, 0.95f);
-                try { Thread.sleep(1200); } catch (InterruptedException ignored) {}
             }
             try { Thread.sleep(POLL_INTERVAL_MS); } catch (InterruptedException ignored) {}
         }
@@ -1133,32 +1121,38 @@ public class SpotifyPlayFromArtistExecutor {
     private static boolean performClickOnNodeOrAncestor(AccessibilityNodeInfo node) {
         if (node == null) return false;
 
-        AccessibilityNodeInfo clickable = node;
-        while (clickable != null && !clickable.isClickable()) {
-            AccessibilityNodeInfo parent = clickable.getParent();
-            if (parent == null) break;
-            if (clickable != node) clickable.recycle();
-            clickable = parent;
+        // 1. Direct click on node if clickable
+        if (node.isClickable() && node.performAction(AccessibilityNodeInfo.ACTION_CLICK)) {
+            return true;
         }
 
-        if (clickable == null) clickable = node;
+        // 2. Traverse up parent hierarchy (up to 6 levels)
+        AccessibilityNodeInfo current = node.getParent();
+        for (int i = 0; i < 6 && current != null; i++) {
+            if (current.isClickable() && current.performAction(AccessibilityNodeInfo.ACTION_CLICK)) {
+                current.recycle();
+                return true;
+            }
+            AccessibilityNodeInfo next = current.getParent();
+            current.recycle();
+            current = next;
+        }
 
-        boolean clicked = clickable.performAction(AccessibilityNodeInfo.ACTION_CLICK);
-
-        // Dispatch physical tap gesture on exact node bounds to ensure touch registration
-        SpotifyAccessibilityService service = SpotifyAccessibilityService.getInstance();
-        if (service != null) {
-            android.graphics.Rect rect = new android.graphics.Rect();
-            node.getBoundsInScreen(rect);
-            if (!rect.isEmpty() && rect.width() > 0 && rect.height() > 0) {
-                service.clickCoordinates(rect.centerX(), rect.centerY());
-                clicked = true;
+        // 3. Traverse down children (1-level)
+        int childCount = node.getChildCount();
+        for (int i = 0; i < childCount; i++) {
+            AccessibilityNodeInfo child = node.getChild(i);
+            if (child != null) {
+                if (child.isClickable() && child.performAction(AccessibilityNodeInfo.ACTION_CLICK)) {
+                    child.recycle();
+                    return true;
+                }
+                child.recycle();
             }
         }
 
-        if (clickable != node) clickable.recycle();
-
-        return clicked;
+        // 4. Default attempt on original node
+        return node.performAction(AccessibilityNodeInfo.ACTION_CLICK);
     }
 
     // --- TELEMETRY EMITTERS ---
